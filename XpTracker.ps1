@@ -18,6 +18,9 @@
 #>
 param([switch]$Demo)
 
+# Matches the GitHub release tag (v1.0, v1.1, ...) and CHANGELOG.md.
+$AppVersion = '1.0'
+
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 # The launcher runs this hidden, so surface startup errors in a dialog.
@@ -86,7 +89,7 @@ $DataDir = if ($Demo) { Join-Path $env:TEMP 'WardogsXpTracker-demo' } else { Joi
 if ($Demo -and (Test-Path $DataDir)) { Remove-Item -Recurse -Force $DataDir }
 New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
 $LogFile = Join-Path $DataDir 'tracker.log'
-Set-Content -Path $LogFile -Value "$(Get-Date -Format s) starting" -Encoding utf8
+Set-Content -Path $LogFile -Value "$(Get-Date -Format s) starting v$AppVersion" -Encoding utf8
 function Write-Log([string]$Text) { Add-Content -Path $LogFile -Value "$(Get-Date -Format s) $Text" -Encoding utf8 }
 
 $SettingsFile = Join-Path $DataDir 'settings.json'
@@ -686,7 +689,7 @@ function New-TrayIcon {
 
 $tray = New-Object System.Windows.Forms.NotifyIcon
 $tray.Icon = New-TrayIcon
-$tray.Text = $(if ($Demo) { 'Wardogs XP Tracker (demo)' } else { 'Wardogs XP Tracker' })
+$tray.Text = "Wardogs XP Tracker v$AppVersion$(if ($Demo) { ' (demo)' })"
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 $miShow    = $menu.Items.Add('Hide');                $miShow.ShortcutKeyDisplayString  = 'Ctrl+Shift+O'
 $miNext    = $menu.Items.Add('Next match');          $miNext.ShortcutKeyDisplayString  = 'Ctrl+Shift+N'

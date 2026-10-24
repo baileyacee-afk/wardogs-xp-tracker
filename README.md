@@ -5,10 +5,17 @@ its **2,500 XP end-of-match bonus cap**, with alerts at every 500 XP tier.
 Each role has its own cap, so once one is maxed you can switch roles and earn another bonus.
 No install needed: it uses PowerShell and Windows' built-in text recognition.
 
+## Download
+
+Get the latest version from the **[Releases page](https://github.com/baileyacee-afk/wardogs-xp-tracker/releases/latest)**:
+under *Assets*, download `wardogs-xp-tracker-vX.Y.zip`. What changed in each version is in
+[CHANGELOG.md](CHANGELOG.md). To update, download the new zip and replace the old folder; your
+matches and settings are kept.
+
 ## Start
 
-1. **Extract the zip first** (right-click it > *Extract All...*). Running it from inside the zip
-   doesn't work.
+1. Right-click the zip > *Properties* > tick **Unblock**, then **extract it** (right-click >
+   *Extract All...*). Running it from inside the zip doesn't work.
 2. Double-click **Start XP Tracker.cmd** in the extracted folder.
 
 It opens in the top-right corner of your screen (your second monitor, if you have one). Drag it
