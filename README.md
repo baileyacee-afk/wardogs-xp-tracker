@@ -72,8 +72,13 @@ Pressing Next Match files the finished match under **Recent Matches**, with each
 ## Notes
 
 - A role's match XP = its XP now minus its XP when the match started.
-- A read that looks wrong (XP going down, or a huge jump) is ignored unless the next read agrees.
+- Misreads are filtered per role: a big drop in a role's XP during a match is always ignored, and
+  smaller odd changes count only after 3 identical reads in a row.
 - The bonus rules (per role, 500 XP per tier, 5 tiers) come from player testing. They're set at the
   top of `TrackerCore.ps1` if the game changes them.
 - Data lives in `%LOCALAPPDATA%\WardogsXpTracker` (tray menu > *Open data folder*):
   `match.json` (current match), `history.json` (past matches), `settings.json`, `tracker.log`.
+
+## License
+
+[MIT](LICENSE). A fan-made tool, not affiliated with the makers of Wardogs.
