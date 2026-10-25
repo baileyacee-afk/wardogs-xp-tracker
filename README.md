@@ -43,9 +43,10 @@ it's open (screenshots + Windows OCR; it never touches the game's memory or file
    2 seconds while it's open and updates your match XP.
 
 The header shows your **Wardog level** (all six role levels added up) and how many levels you've
-gained this match. Below it, the role you're playing (whichever last gained XP) is featured with
-its class symbol; every role also has its own row with its symbol, XP this match, its tier, and a
-bar toward 2,500.
+gained this match. Below it, **Match Bonus** shows how many of the six roles have maxed their
+bonus this match, each role's symbol with a mini bar toward 2,500, and a line about the role
+you're playing (whichever last gained XP). Every role also has its own row with its symbol, XP
+this match, its tier, and a bar toward 2,500.
 At each 500 XP tier you get a sound and a notification naming the role, and the window's border
 flashes. At 2,500 that role turns green and shows **MAX**.
 

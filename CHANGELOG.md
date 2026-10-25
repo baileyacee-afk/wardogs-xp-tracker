@@ -3,6 +3,15 @@
 Versions match the [GitHub releases](https://github.com/baileyacee-afk/wardogs-xp-tracker/releases).
 The version you're running shows when you hover over the tray icon.
 
+## v1.4
+
+- The Match Bonus section now shows **how many of the six roles have maxed their bonus** this
+  match ("2 / 6 roles maxed"), with each role's symbol and a mini bar toward its 2,500 XP cap
+  (gold while filling, green when maxed; the role you're playing is highlighted). An
+  **ALL MAXED** badge appears when all six are done.
+- A line under it describes the role you're playing: its XP and XP to the next tier, or that
+  it's maxed and you can switch roles. (Replaces the single-role number and bar.)
+
 ## v1.3
 
 - Your **Wardog level** (all six role levels added up) is shown large at the top, with the

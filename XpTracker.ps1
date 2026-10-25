@@ -21,7 +21,7 @@
 param([switch]$Demo)
 
 # Matches the GitHub release tag (v1.0, v1.1, ...) and CHANGELOG.md.
-$AppVersion = '1.3'
+$AppVersion = '1.4'
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -174,8 +174,20 @@ $roleRows = foreach ($r in $RoleOrder) {
 "@
 }
 
-$tierLabels = foreach ($t in 1..$TierCount) {
-    "<TextBlock x:Name=`"T$t`" Text=`"$('{0:N0}' -f ($t * $TierSize))`" FontSize=`"10.5`" Foreground=`"$Dim`" HorizontalAlignment=`"Right`"/>"
+# Match bonus overview: each role's symbol with a mini bar toward its 2,500 XP cap.
+$bonusChips = foreach ($r in $RoleOrder) {
+@"
+        <StackPanel Margin="4,0,4,0" ToolTip="$($RoleNames[$r])">
+          $(Get-RoleIconXaml $r 18 "${r}_Chip" '0,0,0,6')
+          <Grid Height="4">
+            <Border Background="#2B2519" CornerRadius="2"/>
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition x:Name="${r}_ChipF" Width="0*"/><ColumnDefinition x:Name="${r}_ChipR" Width="1*"/></Grid.ColumnDefinitions>
+              <Border x:Name="${r}_ChipFill" Background="$Gold" CornerRadius="2"/>
+            </Grid>
+          </Grid>
+        </StackPanel>
+"@
 }
 
 [xml]$xaml = @"
@@ -236,39 +248,24 @@ $tierLabels = foreach ($t in 1..$TierCount) {
         </StackPanel>
       </Grid>
 
-      <!-- featured role: the one you're playing -->
+      <!-- match bonus: how many roles have maxed their bonus this match -->
       <Border Height="1" Background="#2E271A" Margin="14,10,14,8"/>
-      <TextBlock Text="MATCH BONUS" FontSize="11" FontWeight="SemiBold" Foreground="$Gold" Margin="14,0,14,4"/>
-      <StackPanel Orientation="Horizontal" Margin="14,0,14,0">
-        <Border x:Name="FeatIcon" Width="18" Height="18" Margin="0,0,7,0" VerticalAlignment="Center"/>
-        <TextBlock x:Name="TxtRole" Text="NO XP YET" FontSize="15" FontWeight="SemiBold" Foreground="$Gold" VerticalAlignment="Center"/>
-      </StackPanel>
+      <TextBlock Text="MATCH BONUS" FontSize="11" FontWeight="SemiBold" Foreground="$Gold" Margin="14,0,14,2"/>
       <Grid Margin="14,0,14,0">
         <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom">
-          <TextBlock x:Name="TxtXp" Text="0" FontSize="44" FontWeight="Bold" LineHeight="44" LineStackingStrategy="BlockLineHeight"/>
-          <TextBlock x:Name="TxtCap" Text="/ $('{0:N0}' -f $MatchCap)" FontSize="17" Foreground="$Muted" VerticalAlignment="Bottom" Margin="6,0,0,5"/>
+          <TextBlock x:Name="TxtMaxed" Text="0" FontSize="44" FontWeight="Bold" LineHeight="44" LineStackingStrategy="BlockLineHeight"/>
+          <TextBlock Text="/ $($RoleOrder.Count) roles maxed" FontSize="17" Foreground="$Muted" VerticalAlignment="Bottom" Margin="6,0,0,5"/>
         </StackPanel>
-        <Border x:Name="Badge" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,0,8"
-                BorderBrush="#4A3F28" BorderThickness="1" CornerRadius="3" Padding="7,2">
-          <TextBlock x:Name="TxtTier" Text="TIER 0 / $TierCount" FontSize="12" FontWeight="SemiBold" Foreground="$Gold"/>
+        <Border x:Name="Badge" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,0,8" Visibility="Collapsed"
+                BorderBrush="$Green" BorderThickness="1" CornerRadius="3" Padding="7,2">
+          <TextBlock Text="ALL MAXED" FontSize="12" FontWeight="SemiBold" Foreground="$Green"/>
         </Border>
       </Grid>
-
-      <Grid Height="10" Margin="14,8,14,0">
-        <Border Background="#2B2519" CornerRadius="5"/>
-        <Grid>
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition x:Name="ColFill" Width="0*"/>
-            <ColumnDefinition x:Name="ColRest" Width="1*"/>
-          </Grid.ColumnDefinitions>
-          <Border x:Name="Fill" Background="$Gold" CornerRadius="5"/>
-        </Grid>
-        <UniformGrid Columns="$TierCount">$tickBorders</UniformGrid>
-      </Grid>
-      <UniformGrid Columns="$TierCount" Margin="14,4,14,0">
-        $($tierLabels -join "`n        ")
+      <!-- one symbol per role with a mini bar toward its cap -->
+      <UniformGrid Columns="$($RoleOrder.Count)" Margin="10,10,10,0">
+$($bonusChips -join "`n")
       </UniformGrid>
-      <TextBlock x:Name="TxtNote" Text=" " FontSize="12.5" Foreground="$Muted" Margin="14,8,14,0" TextWrapping="Wrap"/>
+      <TextBlock x:Name="TxtNote" Text=" " FontSize="12.5" Foreground="$Muted" Margin="14,10,14,0" TextWrapping="Wrap"/>
 
       <!-- roles -->
       <Border Height="1" Background="#2E271A" Margin="14,12,14,6"/>
@@ -319,12 +316,6 @@ function Set-Bar($ColFill, $ColRest, [long]$Xp) {
     $ColRest.Width = New-Object System.Windows.GridLength (1 - $ratio), 'Star'
 }
 
-# A class symbol as a standalone element (for the featured role, which changes).
-function New-RoleIcon([string]$Role, [double]$Size) {
-    $x = (Get-RoleIconXaml $Role $Size) -replace '^<Viewbox', '<Viewbox xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"'
-    [Windows.Markup.XamlReader]::Parse($x)
-}
-
 # Recolors every shape inside a class symbol.
 function Set-IconColor($Icon, $Brush) {
     if (-not $Icon) { return }
@@ -334,41 +325,39 @@ function Set-IconColor($Icon, $Brush) {
     }
 }
 
-$script:FeatRole = '(none yet)'
 function Update-UI {
     $gains  = Get-RoleGains
     $active = Get-ActiveRole
-
-    # Featured role at the top.
-    $xp   = if ($active) { $gains[$active] } else { [long]0 }
-    $tier = Get-Tier $xp
-    $max  = $xp -ge $MatchCap
-    $ui.TxtRole.Text = if ($active) { $RoleNames[$active].ToUpper() } else { 'NO XP YET THIS MATCH' }
-    if ($active -ne $script:FeatRole) {
-        $script:FeatRole = $active
-        $ui.FeatIcon.Child = if ($active) { New-RoleIcon $active 18 } else { $null }
-    }
-    if ($ui.FeatIcon.Child) { Set-IconColor $ui.FeatIcon.Child $(if ($max) { $Brush.Green } else { $Brush.Gold }) }
 
     # Wardog level: all six role levels added up, plus levels gained this match.
     $wl = Get-WardogLevel
     $ui.TxtWardogLv.Text = if ($null -ne $wl) { "$wl" } else { '-' }
     $gained = Get-LevelsGained
     $ui.TxtLvGain.Text = if ($gained -gt 0) { "+$gained this match" } else { ' ' }
-    $ui.TxtXp.Text = '{0:N0}' -f $xp
-    $ui.TxtXp.Foreground = if ($max) { $Brush.Green } else { $Brush.Ink }
-    Set-Bar $ui.ColFill $ui.ColRest $xp
-    $ui.Fill.Background = if ($max) { $Brush.Green } else { $Brush.Gold }
-    $ui.TxtTier.Text = if ($max) { 'MAX BONUS' } else { "TIER $tier / $TierCount" }
-    $ui.TxtTier.Foreground = if ($max) { $Brush.Green } else { $Brush.Gold }
-    $ui.Badge.BorderBrush = if ($max) { $Brush.Green } else { New-Brush '#4A3F28' }
-    foreach ($t in 1..$TierCount) { $ui["T$t"].Foreground = if ($tier -ge $t) { $ui.Fill.Background } else { $Brush.Dim } }
 
+    # Match bonus: how many roles have maxed theirs, and a symbol + mini bar per role.
+    $maxed = @($RoleOrder | Where-Object { $gains[$_] -ge $MatchCap }).Count
+    $all = $maxed -eq $RoleOrder.Count
+    $ui.TxtMaxed.Text = "$maxed"
+    $ui.TxtMaxed.Foreground = if ($maxed -gt 0) { $Brush.Green } else { $Brush.Ink }
+    $ui.Badge.Visibility = if ($all) { 'Visible' } else { 'Collapsed' }
+    foreach ($r in $RoleOrder) {
+        $g = $gains[$r]; $rmax = $g -ge $MatchCap
+        Set-Bar $ui["${r}_ChipF"] $ui["${r}_ChipR"] $g
+        $ui["${r}_ChipFill"].Background = if ($rmax) { $Brush.Green } else { $Brush.Gold }
+        Set-IconColor $ui["${r}_Chip"] $(if ($rmax) { $Brush.Green } elseif ($r -eq $active) { $Brush.Gold } elseif ($g -gt 0) { $Brush.Muted } else { $Brush.Dim })
+    }
+
+    # One line about the role you're playing.
     $ui.TxtNote.Text =
         if (-not $State.Base) { 'Open the Wardog Level screen in game to save your starting XP.' }
-        elseif (-not $active) { 'Each role has its own 2,500 XP bonus cap. The role you earn XP in shows up here.' }
-        elseif ($max)         { "$($RoleNames[$active]) is maxed for this match. Another role can still earn its own bonus." }
-        else                  { "$('{0:N0}' -f ($TierSize * ($tier + 1) - $xp)) XP to tier $($tier + 1)" }
+        elseif ($all)         { 'Every role has maxed its bonus this match.' }
+        elseif (-not $active) { 'Each role has its own 2,500 XP bonus. Earn XP in a role to start its bar.' }
+        else {
+            $xp = $gains[$active]; $tier = Get-Tier $xp; $name = $RoleNames[$active]
+            if ($xp -ge $MatchCap) { "Playing $name`: maxed. Switch to another role to earn another bonus." }
+            else { "Playing $name`: $('{0:N0}' -f $xp) / $('{0:N0}' -f $MatchCap) XP, $('{0:N0}' -f ($TierSize * ($tier + 1) - $xp)) to tier $($tier + 1)." }
+        }
 
     # Every role's own progress toward its cap.
     $dot = [char]0xB7
