@@ -66,7 +66,7 @@ Press END MATCH a second time to file a match straight away without the bonus.
 - **Roles:** each class's XP this match, tier, and bar toward 2,500.
 - **DETAILS** (or click any match under Recent Matches): total XP and cash, the deduced bonus,
   XP and cash grouped by reason with counts, and every popup in order with its time.
-  **PICTURE** opens a picture of the tracker as it looked at the end of that match, and **SAVE**
+  **PICTURE** opens a picture of the tracker right after that match was filed, and **SAVE**
   writes the whole page, picture included, as one file in `Documents\Wardogs XP Tracker` that
   opens in your browser.
 

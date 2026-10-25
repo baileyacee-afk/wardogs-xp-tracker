@@ -21,7 +21,7 @@
 param([switch]$Demo)
 
 # Matches the GitHub release tag (v1.0, v1.1, ...) and CHANGELOG.md.
-$AppVersion = '2.3'
+$AppVersion = '2.4'
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -597,7 +597,6 @@ function Read-Area([System.Drawing.Rectangle]$Rect) {
 }
 
 function Use-Read($Progress) {
-    if ($State.EndRequested) { Save-EndSnapshot }   # this read may file the match
     $res = Add-Read $Progress
     if ($res.Note -and $res.Note -ne $script:LastNote) { Write-Log "read: $($res.Note)" }
     $script:LastNote = $res.Note
@@ -606,6 +605,7 @@ function Use-Read($Progress) {
     $script:Status = ''
     if ($res.Filed) { Show-Filed $res.Filed }
     Update-UI
+    if ($res.Filed) { Save-FiledSnapshot $res.Filed }
 }
 
 function Show-TierAlert([string]$Role, [int]$Tier) {
@@ -898,6 +898,7 @@ function Switch-Continuous {
 # Ctrl+Shift+N / END MATCH: marks the match over; the next Wardog Level read files it with the bonus.
 # Pressing it again files it right away, without the bonus.
 function Invoke-EndMatch {
+    $filed = $null
     if (-not $State.EndRequested) {
         if (-not (Test-MatchActive)) { Set-Status 'Nothing to file yet: no XP or popups this match.'; return }
         [void](Request-EndMatch)
@@ -905,13 +906,14 @@ function Invoke-EndMatch {
         Write-Log 'match ended'
         $tray.ShowBalloonTip(5000, 'Match ended', 'Open the Wardog Level screen to read your final XP. The tracker works out the end-of-match bonus from it.', 'None')
     } else {
-        Save-EndSnapshot
-        Show-Filed (Complete-Match -NoFinalRead)
+        $filed = Complete-Match -NoFinalRead
+        Show-Filed $filed
     }
     $ui.Frame.BorderThickness = New-Object System.Windows.Thickness 1
     $ui.Frame.BorderBrush = New-Brush '#4A3F28'
     $script:Status = ''
     Update-UI
+    if ($filed) { Save-FiledSnapshot $filed }
 }
 
 # A picture of the tracker window as it looks now (2x size, for a sharp image).
@@ -935,10 +937,12 @@ function Save-WindowSnapshot([string]$Path) {
     } catch { Write-Log "snapshot ERROR $_"; $false }
 }
 
-# The window at the end of the match, saved next to the match's popups (matches\<start>.png).
-function Save-EndSnapshot {
-    $stamp = ([datetime]::Parse($State.Start)).ToString('yyyyMMdd-HHmmss')
-    [void](Save-WindowSnapshot (Join-Path $DataDir "matches\$stamp.png"))
+# The window right after a match is filed (the match at the top of Recent Matches, with the Wardog
+# level), saved next to the match's popups as matches\<start>.png.
+function Save-FiledSnapshot($Entry) {
+    $win.UpdateLayout()
+    $rel = 'matches\{0}.png' -f ([datetime]::Parse($Entry.Start)).ToString('yyyyMMdd-HHmmss')
+    if (Save-WindowSnapshot (Join-Path $DataDir $rel)) { $Entry.Snapshot = $rel; Save-TrackerSoon }
 }
 
 function Show-Filed($Entry) {
@@ -1066,7 +1070,7 @@ function Export-MatchReport($Entry, $Lines, [bool]$Live) {
     $pic = if ($Entry.Snapshot) { Join-Path $DataDir $Entry.Snapshot } else { $null }
     if ($Live) { $pic = Join-Path $env:TEMP 'wardogs-live-snapshot.png'; if (-not (Save-WindowSnapshot $pic)) { $pic = $null } }
     if ($pic -and (Test-Path $pic)) {
-        $img = '<figure><img alt="The tracker at the end of the match" src="data:image/png;base64,' + [Convert]::ToBase64String([IO.File]::ReadAllBytes($pic)) + '"><figcaption>' + $(if ($Live) { 'The tracker when this was saved' } else { 'The tracker at the end of the match' }) + '</figcaption></figure>'
+        $img = '<figure><img alt="The tracker after this match" src="data:image/png;base64,' + [Convert]::ToBase64String([IO.File]::ReadAllBytes($pic)) + '"><figcaption>' + $(if ($Live) { 'The tracker when this was saved' } else { 'The tracker right after this match was filed' }) + '</figcaption></figure>'
     }
     $when = $start.ToString('dddd, MMM d, yyyy h:mm tt') + $(if ($Entry.End) { ' - ' + ([datetime]::Parse($Entry.End)).ToString('h:mm tt') } else { ' (in progress)' })
 
@@ -1144,7 +1148,7 @@ function Show-MatchDetails($Entry) {
           <TextBlock x:Name="DWhen" FontSize="16" FontWeight="SemiBold"/>
         </StackPanel>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top">
-          <Button x:Name="DPic" Content="PICTURE" ToolTip="The tracker as it looked at the end of this match" Foreground="$Muted" Background="Transparent" BorderBrush="#4A3F28" Padding="8,3" FontSize="11" Cursor="Hand" Margin="0,0,6,0"/>
+          <Button x:Name="DPic" Content="PICTURE" ToolTip="The tracker right after this match was filed" Foreground="$Muted" Background="Transparent" BorderBrush="#4A3F28" Padding="8,3" FontSize="11" Cursor="Hand" Margin="0,0,6,0"/>
           <Button x:Name="DSave" Content="SAVE" ToolTip="Save this page (with the picture) to Documents\Wardogs XP Tracker and open it" Foreground="$Gold" Background="Transparent" BorderBrush="#4A3F28" Padding="8,3" FontSize="11" Cursor="Hand" Margin="0,0,6,0"/>
           <Button x:Name="DClose" Content="CLOSE" Foreground="$Muted" Background="Transparent" BorderBrush="#4A3F28" Padding="8,3" FontSize="11" Cursor="Hand"/>
         </StackPanel>
@@ -1368,6 +1372,9 @@ $win.add_ContentRendered({
         Write-Log "placement ERROR $_"
         try { Move-ToSpot 'Center' ([System.Windows.Forms.Screen]::PrimaryScreen) } catch { $win.Left = 100; $win.Top = 100 }
     }
+    # The last match filed before pictures were taken: if nothing has happened since, the window
+    # still shows it just as it looked when filed.
+    try { if (-not $Demo -and @($History).Count -and -not $History[0].Snapshot -and -not (Test-MatchActive)) { Save-FiledSnapshot $History[0] } } catch { Write-Log "snapshot ERROR $_" }
     $where = if (@([System.Windows.Forms.Screen]::AllScreens).Count -gt 1) { 'on your screen' } else { 'in the corner of your screen' }
     if (-not $Demo) { $tray.ShowBalloonTip(5000, 'Wardogs XP Tracker is running', "It's $where. Drag it anywhere, or press Ctrl+Shift+M to jump between corners.", 'None') }
 })

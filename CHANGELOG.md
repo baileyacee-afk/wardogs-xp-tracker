@@ -3,6 +3,12 @@
 Versions match the [GitHub releases](https://github.com/baileyacee-afk/wardogs-xp-tracker/releases).
 The version you're running shows when you hover over the tray icon.
 
+## v2.4
+
+- The match picture is now the tracker right after the match is filed: the match at the top of
+  Recent Matches with its totals and bonus, and your Wardog level. The last match filed before
+  this update gets its picture when the tracker starts, if no new match has begun.
+
 ## v2.3
 
 - **Save a match:** SAVE in match details writes the whole page (summary, bonus, cash, XP and cash
