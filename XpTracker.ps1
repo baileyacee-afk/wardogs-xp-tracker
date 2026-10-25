@@ -13,7 +13,7 @@
     Ctrl+Shift+PageUp     More opaque
     Ctrl+Shift+PageDown   More transparent
     Ctrl+Shift+M          Move to the next corner of the screen (or drag it anywhere)
-    Ctrl+Shift+R          Start / stop recording samples of the top-right corner (class picked in the tray)
+    Ctrl+Shift+R          Start / stop recording samples of the top-right corner (temporary)
     Ctrl+Shift+S          Save a full screenshot of the game (e.g. the end-of-match screen)
 
   -Demo plays back made-up reads (no game needed) using a throwaway data folder.
@@ -21,7 +21,7 @@
 param([switch]$Demo)
 
 # Matches the GitHub release tag (v1.0, v1.1, ...) and CHANGELOG.md.
-$AppVersion = '1.1'
+$AppVersion = '1.2'
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -101,7 +101,6 @@ $Settings = [ordered]@{
     PanelRect    = $null   # "x,y,w,h": where the in-game Wardog Level panel was last found
     PanelRoles   = 0       # how many roles were readable when it was found
     RecordRect   = $null   # "x,y,w,h": area the sample recorder saves; default is the game's top-right
-    RecordLabel  = 'Unlabeled'   # class picked for the next recording
     WindowPos    = $null   # "x,y": where you last dragged the window
 }
 if (Test-Path $SettingsFile) {
@@ -660,26 +659,21 @@ function Invoke-Poll {
 
 # ---------------------------------------------------------------- sample recorder controls
 function Update-RecordMenu {
-    $miRecToggle.Text = if ($script:Rec) { "Stop recording ($($script:Rec.Label))" } else { "Start recording ($($Settings.RecordLabel))" }
-    foreach ($mi in $miRecClasses) { $mi.Checked = ([string]$mi.Tag -eq $Settings.RecordLabel) }
+    $miRecToggle.Text = if ($script:Rec) { 'Stop recording' } else { 'Start recording' }
     Update-StatusLine
 }
 
-function Start-RecordingAs([string]$Label) {
-    $Settings.RecordLabel = $Label; Save-Settings
-    Start-Recording $Label
-    $tray.ShowBalloonTip(3000, "Recording samples: $Label", 'Saving the top-right corner while you play. Ctrl+Shift+R stops it.', 'None')
-    Update-RecordMenu
-}
-
-# Ctrl+Shift+R: stop if recording, otherwise start with the last class picked.
+# Ctrl+Shift+R
 function Switch-Recording {
     if ($script:Rec) {
-        $n = $script:Rec.Frames; $label = $script:Rec.Label
+        $n = $script:Rec.Frames
         Stop-Recording
-        $tray.ShowBalloonTip(3000, 'Recording stopped', "$label`: $n frames saved.", 'None')
-        Update-RecordMenu
-    } else { Start-RecordingAs $Settings.RecordLabel }
+        $tray.ShowBalloonTip(3000, 'Recording stopped', "$n frames saved.", 'None')
+    } else {
+        Start-Recording
+        $tray.ShowBalloonTip(3000, 'Recording samples', 'Saving the top-right corner while you play. Open the Wardog Level screen now and then. Ctrl+Shift+R stops it.', 'None')
+    }
+    Update-RecordMenu
 }
 
 # Ctrl+Shift+S
@@ -765,17 +759,10 @@ $miCycle.add_Click({ Move-ToNextCorner })
 # Only offer "Next monitor" when there is more than one.
 $miMove.add_DropDownOpening({ $miNextScreen.Visible = @([System.Windows.Forms.Screen]::AllScreens).Count -gt 1 })
 $menu.Items.Add($miMove) | Out-Null
-# Sample recorder: pick the class you're about to play, then record; one session per class.
+# Sample recorder (temporary, for building the popup reader).
 $miRecord  = New-Object System.Windows.Forms.ToolStripMenuItem 'Record samples'
 $miRecToggle = $miRecord.DropDownItems.Add('Start recording'); $miRecToggle.ShortcutKeyDisplayString = 'Ctrl+Shift+R'
 $miRecToggle.add_Click({ Switch-Recording })
-$miRecord.DropDownItems.Add('-') | Out-Null
-$miRecClasses = foreach ($label in @($RoleOrder | ForEach-Object { $RoleNames[$_] }) + 'Unlabeled') {
-    $mi = $miRecord.DropDownItems.Add("Record as $label"); $mi.Tag = $label
-    $mi.add_Click({ param($s) Start-RecordingAs ([string]$s.Tag) })
-    $mi
-}
-$miRecord.DropDownItems.Add('-') | Out-Null
 $miShot = $miRecord.DropDownItems.Add('Save full screenshot'); $miShot.ShortcutKeyDisplayString = 'Ctrl+Shift+S'
 $miShot.add_Click({ Save-ManualScreenshot })
 $miSamples = $miRecord.DropDownItems.Add('Open samples folder')

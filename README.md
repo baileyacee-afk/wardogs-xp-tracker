@@ -52,12 +52,14 @@ Pressing Next Match files the finished match under **Recent Matches**, with each
 ## Recording samples
 
 Live tracking of the in-match XP and cash popups is in the works. To build it, the tracker needs
-real examples of those popups, one class at a time:
+real examples of those popups. This recorder is temporary and will be removed once that's done.
 
-1. Right-click the tray icon > **Record samples** > **Record as** *the class you're about to play*.
-2. Play normally. The status line shows **REC**, the time and the frame count.
-3. Press **Ctrl+Shift+R** to stop. Next time, Ctrl+Shift+R starts recording again with the same
-   class; pick a different one in the tray menu when you switch.
+1. Press **Ctrl+Shift+R** (or tray > **Record samples** > *Start recording*) and play normally.
+   The status line shows **REC**, the time and the frame count.
+2. Open the **Wardog Level** screen now and then, especially after switching class. Those reads
+   tell which class each popup symbol belongs to, so you don't need to record one class at a time.
+3. Press **Ctrl+Shift+R** again to stop. Record as many sessions as you like; aim to cover all
+   six classes overall.
 4. On the end-of-match screen, press **Ctrl+Shift+S** to save a full screenshot.
 
 Recordings are saved in tray > Record samples > *Open samples folder*, one folder per session.

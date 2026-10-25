@@ -3,6 +3,13 @@
 Versions match the [GitHub releases](https://github.com/baileyacee-afk/wardogs-xp-tracker/releases).
 The version you're running shows when you hover over the tray icon.
 
+## v1.2
+
+- Sample recorder is now a plain start/stop (Ctrl+Shift+R); there's no class to pick. Which class
+  each popup belongs to is worked out from the Wardog Level reads logged while recording, so
+  getting XP for several classes in one recording is fine.
+- The recorder is temporary and will be removed once live popup tracking is built.
+
 ## v1.1
 
 Sample recorder, to collect real examples of the in-match XP and cash popups for the upcoming

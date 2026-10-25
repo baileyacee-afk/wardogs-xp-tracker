@@ -1,7 +1,11 @@
 # Sample recorder: saves what appears in the top-right corner of the game (XP/cash popups and the
-# cash boxes) so the popup reader can be built and tuned from real examples.
+# cash boxes) so the popup reader can be built and tuned from real examples. Temporary: it goes
+# away once the popup reader exists.
 #
-# Each recording is one session folder under <data>\samples\<time>-<class>\ with:
+# Which class a popup belongs to is worked out afterwards from the Wardog Level reads in
+# session.log (whichever role's XP rose between two reads), so recordings aren't tied to a class.
+#
+# Each recording is one session folder under <data>\samples\<date_time>\ with:
 #   frames\HHmmss-fff.jpg   the corner, 2 frames a second, skipping frames identical to the last
 #   full-HHmmss.jpg         the whole game window every 2 minutes (and on Ctrl+Shift+S)
 #   session.log             start/stop, settings used, and every Wardog Level read while recording
@@ -78,15 +82,13 @@ function Write-RecLog([string]$Text) {
     if ($script:Rec) { Add-Content -Path (Join-Path $script:Rec.Dir 'session.log') -Value "$(Get-Date -Format 'HH:mm:ss.fff') $Text" -Encoding utf8 }
 }
 
-function Start-Recording([string]$Label) {
-    if ($script:Rec) { Stop-Recording 'switching class' }
-    if (-not $Label) { $Label = 'unlabeled' }
-    $dir = Join-Path (Get-SamplesDir) ("{0}-{1}" -f (Get-Date -Format 'yyyy-MM-dd_HHmmss'), $Label.ToLower())
+function Start-Recording {
+    if ($script:Rec) { return }
+    $dir = Join-Path (Get-SamplesDir) (Get-Date -Format 'yyyy-MM-dd_HHmmss')
     New-Item -ItemType Directory -Force -Path (Join-Path $dir 'frames') | Out-Null
-    $script:Rec = @{ Dir = $dir; Label = $Label; Start = Get-Date; Frames = 0; Skipped = 0; LastThumb = $null; LastFull = [datetime]::MinValue }
-    $rect = Get-RecordRect
-    Write-RecLog "start: class=$Label area=$rect fps=$RecordFps tracker=v$AppVersion"
-    Write-Log "recording started ($Label) -> $dir"
+    $script:Rec = @{ Dir = $dir; Start = Get-Date; Frames = 0; Skipped = 0; LastThumb = $null; LastFull = [datetime]::MinValue }
+    Write-RecLog "start: area=$(Get-RecordRect) fps=$RecordFps tracker=v$AppVersion"
+    Write-Log "recording started -> $dir"
 }
 
 function Stop-Recording([string]$Why = 'stopped') {
@@ -132,9 +134,9 @@ function Save-FullScreenshot([switch]$Manual) {
     $path
 }
 
-# Short text for the status line, e.g. "REC Medic 12:04 - 830 frames".
+# Short text for the status line, e.g. "REC 12:04 - 830 frames".
 function Get-RecordStatus {
     if (-not $script:Rec) { return '' }
     $t = (Get-Date) - $script:Rec.Start
-    "REC {0} {1:00}:{2:00} - {3} frames" -f $script:Rec.Label, [int][Math]::Floor($t.TotalMinutes), $t.Seconds, $script:Rec.Frames
+    "REC {0:00}:{1:00} - {2} frames" -f [int][Math]::Floor($t.TotalMinutes), $t.Seconds, $script:Rec.Frames
 }
