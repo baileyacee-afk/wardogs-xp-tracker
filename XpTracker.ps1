@@ -21,7 +21,7 @@
 param([switch]$Demo)
 
 # Matches the GitHub release tag (v1.0, v1.1, ...) and CHANGELOG.md.
-$AppVersion = '2.4'
+$AppVersion = '2.5'
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -105,6 +105,9 @@ $Settings = [ordered]@{
     PopupPollMs  = 300     # how often the popup area is checked (about 3 times a second)
     PopupRect    = $null   # "x,y,w,h": where XP/cash popups appear; default is under the top-right cash boxes
     WindowPos    = $null   # "x,y": where you last dragged the window
+    StartMenuShortcut = $true    # "Wardogs XP Tracker" in the Start menu
+    DesktopShortcut   = $false
+    StartWithWindows  = $false
 }
 if (Test-Path $SettingsFile) {
     try {
@@ -1284,17 +1287,81 @@ function Set-PopupArea {
 }
 
 # ---------------------------------------------------------------- tray icon
-function New-TrayIcon {
-    $bmp = New-Object System.Drawing.Bitmap 32, 32
+# The app's "XP" badge, drawn at any size (tray icon, shortcut icon).
+function New-BadgeBitmap([int]$Size) {
+    $k = $Size / 32.0
+    $bmp = New-Object System.Drawing.Bitmap $Size, $Size
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     $g.SmoothingMode = 'AntiAlias'; $g.TextRenderingHint = 'AntiAliasGridFit'
-    $g.FillRectangle((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(20, 16, 10))), 0, 0, 32, 32)
-    $g.DrawRectangle((New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(216, 180, 90)), 2), 1, 1, 29, 29)
-    $font = New-Object System.Drawing.Font 'Bahnschrift', 15, ([System.Drawing.FontStyle]::Bold), ([System.Drawing.GraphicsUnit]::Pixel)
+    $g.FillRectangle((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(20, 16, 10))), 0, 0, $Size, $Size)
+    $g.DrawRectangle((New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(216, 180, 90)), (2 * $k)), $k, $k, (29 * $k), (29 * $k))
+    $font = New-Object System.Drawing.Font 'Bahnschrift', (15 * $k), ([System.Drawing.FontStyle]::Bold), ([System.Drawing.GraphicsUnit]::Pixel)
     $fmt = New-Object System.Drawing.StringFormat; $fmt.Alignment = 'Center'; $fmt.LineAlignment = 'Center'
-    $g.DrawString('XP', $font, (New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(216, 180, 90))), (New-Object System.Drawing.RectangleF 0, 1, 32, 32), $fmt)
+    $g.DrawString('XP', $font, (New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(216, 180, 90))), (New-Object System.Drawing.RectangleF 0, $k, $Size, $Size), $fmt)
     $g.Dispose()
-    [System.Drawing.Icon]::FromHandle($bmp.GetHicon())
+    $bmp
+}
+
+function New-TrayIcon { [System.Drawing.Icon]::FromHandle((New-BadgeBitmap 32).GetHicon()) }
+
+# ---------------------------------------------------------------- shortcuts
+# Start menu (on by default), desktop and Start with Windows (off by default), each a tray toggle.
+# They start the tracker the same way as Start XP Tracker.cmd, from wherever it's extracted.
+$ShortcutName = 'Wardogs XP Tracker.lnk'
+function Get-ShortcutPath([string]$Kind) {
+    $folder = switch ($Kind) { 'StartMenu' { 'Programs' } 'Desktop' { 'Desktop' } 'Startup' { 'Startup' } }
+    Join-Path ([Environment]::GetFolderPath($folder)) $ShortcutName
+}
+
+# A 256 px icon file for the shortcuts (an .ico holding one PNG image).
+function Get-ShortcutIcon {
+    $path = Join-Path $DataDir 'tracker.ico'
+    if (Test-Path $path) { return $path }
+    $bmp = New-BadgeBitmap 256
+    $png = New-Object IO.MemoryStream
+    $bmp.Save($png, [System.Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
+    $data = $png.ToArray()
+    $out = New-Object IO.MemoryStream
+    $w = New-Object IO.BinaryWriter $out
+    $w.Write([uint16]0); $w.Write([uint16]1); $w.Write([uint16]1)              # icon file, one image
+    $w.Write([byte]0); $w.Write([byte]0); $w.Write([byte]0); $w.Write([byte]0) # 256 x 256, no palette
+    $w.Write([uint16]1); $w.Write([uint16]32); $w.Write([uint32]$data.Length); $w.Write([uint32]22)
+    $w.Write($data); $w.Flush()
+    [IO.File]::WriteAllBytes($path, $out.ToArray())
+    $path
+}
+
+function Set-Shortcut([string]$Kind, [bool]$On) {
+    $path = Get-ShortcutPath $Kind
+    if (-not $On) { if (Test-Path $path) { Remove-Item $path -Force }; return }
+    $sh = New-Object -ComObject WScript.Shell
+    $lnk = $sh.CreateShortcut($path)
+    $lnk.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $lnk.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $PSScriptRoot 'XpTracker.ps1')`""
+    $lnk.WorkingDirectory = $PSScriptRoot
+    $lnk.IconLocation = Get-ShortcutIcon
+    $lnk.WindowStyle = 7   # minimized, so no console window flashes up
+    $lnk.Description = 'Wardogs XP Tracker'
+    $lnk.Save()
+}
+
+# At startup: (re)write the shortcuts that are on, so they follow the folder if it was moved.
+function Update-Shortcuts {
+    foreach ($s in @(@('StartMenu', 'StartMenuShortcut'), @('Desktop', 'DesktopShortcut'), @('Startup', 'StartWithWindows'))) {
+        if ($Settings[$s[1]]) { try { Set-Shortcut $s[0] $true } catch { Write-Log "shortcut ERROR ($($s[0])) $_" } }
+    }
+}
+
+function Switch-Shortcut([string]$Kind, [string]$Setting, $MenuItem) {
+    $on = -not $Settings[$Setting]
+    try {
+        Set-Shortcut $Kind $on
+        $Settings[$Setting] = $on; Save-Settings
+        $MenuItem.Checked = $on
+    } catch {
+        Write-Log "shortcut ERROR ($Kind) $_"
+        $tray.ShowBalloonTip(4000, 'Wardogs XP Tracker', "Couldn't change the shortcut: $($_.Exception.Message)", 'Warning')
+    }
 }
 
 $tray = New-Object System.Windows.Forms.NotifyIcon
@@ -1328,6 +1395,14 @@ $miCycle.add_Click({ Move-ToNextCorner })
 # Only offer "Next monitor" when there is more than one.
 $miMove.add_DropDownOpening({ $miNextScreen.Visible = @([System.Windows.Forms.Screen]::AllScreens).Count -gt 1 })
 $menu.Items.Add($miMove) | Out-Null
+$miShortcuts = New-Object System.Windows.Forms.ToolStripMenuItem 'Shortcuts'
+$miScStart = $miShortcuts.DropDownItems.Add('In the Start menu'); $miScStart.Checked = [bool]$Settings.StartMenuShortcut
+$miScDesk  = $miShortcuts.DropDownItems.Add('On the desktop');    $miScDesk.Checked  = [bool]$Settings.DesktopShortcut
+$miScBoot  = $miShortcuts.DropDownItems.Add('Start with Windows'); $miScBoot.Checked = [bool]$Settings.StartWithWindows
+$miScStart.add_Click({ Switch-Shortcut 'StartMenu' 'StartMenuShortcut' $miScStart })
+$miScDesk.add_Click({ Switch-Shortcut 'Desktop' 'DesktopShortcut' $miScDesk })
+$miScBoot.add_Click({ Switch-Shortcut 'Startup' 'StartWithWindows' $miScBoot })
+$menu.Items.Add($miShortcuts) | Out-Null
 $miFolder  = $menu.Items.Add('Open data folder')
 $menu.Items.Add('-') | Out-Null
 $miQuit    = $menu.Items.Add('Quit')
@@ -1375,8 +1450,14 @@ $win.add_ContentRendered({
     # The last match filed before pictures were taken: if nothing has happened since, the window
     # still shows it just as it looked when filed.
     try { if (-not $Demo -and @($History).Count -and -not $History[0].Snapshot -and -not (Test-MatchActive)) { Save-FiledSnapshot $History[0] } } catch { Write-Log "snapshot ERROR $_" }
+    $newStart = $false
+    if (-not $Demo) {
+        $newStart = $Settings.StartMenuShortcut -and -not (Test-Path (Get-ShortcutPath 'StartMenu'))
+        Update-Shortcuts
+    }
     $where = if (@([System.Windows.Forms.Screen]::AllScreens).Count -gt 1) { 'on your screen' } else { 'in the corner of your screen' }
-    if (-not $Demo) { $tray.ShowBalloonTip(5000, 'Wardogs XP Tracker is running', "It's $where. Drag it anywhere, or press Ctrl+Shift+M to jump between corners.", 'None') }
+    $tip = if ($newStart) { "It's $where. Next time, start it from the Start menu: search for Wardogs. (Desktop shortcut and Start with Windows are in the tray menu under Shortcuts.)" } else { "It's $where. Drag it anywhere, or press Ctrl+Shift+M to jump between corners." }
+    if (-not $Demo) { $tray.ShowBalloonTip(6000, 'Wardogs XP Tracker is running', $tip, 'None') }
 })
 
 $MOD = 0x2 -bor 0x4   # Ctrl + Shift

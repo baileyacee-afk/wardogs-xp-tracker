@@ -3,6 +3,13 @@
 Versions match the [GitHub releases](https://github.com/baileyacee-afk/wardogs-xp-tracker/releases).
 The version you're running shows when you hover over the tray icon.
 
+## v2.5
+
+- **Start menu shortcut:** the first time it runs, the tracker adds "Wardogs XP Tracker" (with its
+  XP badge icon) to the Start menu, so you don't need the extracted folder or the .cmd again.
+- **Shortcuts** in the tray menu: turn the Start menu entry, a desktop shortcut, and Start with
+  Windows on or off. Only the Start menu entry is on to begin with.
+
 ## v2.4
 
 - The match picture is now the tracker right after the match is filed: the match at the top of

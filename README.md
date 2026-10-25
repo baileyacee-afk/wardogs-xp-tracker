@@ -19,7 +19,10 @@ matches and settings are kept.
 
 1. Right-click the zip > *Properties* > tick **Unblock**, then **extract it** (right-click >
    *Extract All...*). Running it from inside the zip doesn't work.
-2. Double-click **Start XP Tracker.cmd** in the extracted folder.
+2. Double-click **Start XP Tracker.cmd** in the extracted folder. You only need to do this once:
+   it adds **Wardogs XP Tracker** to the Start menu, so after that just search for "Wardogs".
+   Keep the extracted folder where it is (the shortcut runs it from there). A desktop shortcut
+   and Start with Windows are in the tray menu under **Shortcuts**, off unless you turn them on.
 
 It opens in the top-right corner of your screen (your second monitor, if you have one). Drag it
 anywhere, or press **Ctrl+Shift+M** to jump between corners; it remembers where you put it.
