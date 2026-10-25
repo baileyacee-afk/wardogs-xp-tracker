@@ -3,6 +3,15 @@
 Versions match the [GitHub releases](https://github.com/baileyacee-afk/wardogs-xp-tracker/releases).
 The version you're running shows when you hover over the tray icon.
 
+## v2.1
+
+- **Wardog Level reads work again:** the level number under the Recon, Driver and Pilot icons is
+  often misread, which made the tracker see only 3 of 6 classes and throw the read away. A class
+  now counts whenever its XP is readable; an unreadable level keeps the last known one.
+- **Automatic end of match is off:** the in-match cash boxes (per-life cash, banked cash, level)
+  look just like the results screen, so it could have ended a match while you were still playing.
+  Press END MATCH (Ctrl+Shift+N) when the match is over.
+
 ## v2.0
 
 Live popup tracking, a breakdown of every match, and the deduced end-of-match bonus.

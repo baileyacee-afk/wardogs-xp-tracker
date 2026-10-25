@@ -21,7 +21,7 @@
 param([switch]$Demo)
 
 # Matches the GitHub release tag (v1.0, v1.1, ...) and CHANGELOG.md.
-$AppVersion = '2.0'
+$AppVersion = '2.1'
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -713,7 +713,9 @@ function Invoke-Poll {
         $script:GameNow = [bool]$game   # the popup poll uses this instead of looking up the game itself
         # Time in a match without live tracking makes the deduced bonus less certain.
         if ((Test-MatchActive) -and -not $State.EndRequested -and $script:LiveState -ne 'on') { Add-LiveGap 2 }
-        if ($game -and $script:Tick % 2 -eq 0) { $rsw = [Diagnostics.Stopwatch]::StartNew(); Invoke-ResultsCheck; Add-Perf 'results' $rsw }
+        # Results-screen detection is off: the in-match HUD (per-life cash, banked cash, level) looks
+        # the same to it and would end matches mid-game. END MATCH / Ctrl+Shift+N ends a match.
+        # if ($game -and $script:Tick % 2 -eq 0) { Invoke-ResultsCheck }
         $rect = Get-PanelRect
         if (-not $rect) {
             # Don't know where the panel is yet: search the game window every ~6 s, or all monitors

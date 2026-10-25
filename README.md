@@ -49,8 +49,7 @@ memory or files.
 ### Each match
 
 1. Just play. Popups are counted from the moment they appear.
-2. When the match is over, the tracker notices the results screen (or press **Ctrl+Shift+N** /
-   **END MATCH**).
+2. When the match is over, press **END MATCH** (or **Ctrl+Shift+N**).
 3. Open the **Wardog Level** screen once. That read files the match under **Recent Matches**, with
    the **end-of-match bonus (deduced)** for each class: the XP that arrived after the match ended.
    The bonus is a fixed XP per tier, so the tracker also tells your placement (700 per tier = 2nd).

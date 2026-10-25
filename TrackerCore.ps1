@@ -156,6 +156,12 @@ function Get-NewTiers {
 
 # Applies one read of the Wardog Level panel.
 # Returns @{ Accepted; Note; NewTiers; Filed } - Filed is the history entry when this read finished a match.
+# A role's level from a read; OCR sometimes can't read it (the icon above it confuses it), and then
+# the last known level stands.
+function Get-ReadLevel($Progress, [string]$Role) {
+    if ($null -ne $Progress[$Role].Level) { $Progress[$Role].Level } else { $script:State.Levels[$Role] }
+}
+
 function Add-Read($Progress) {
     # Roles whose XP was read this time. Usually all six; a role OCR couldn't read keeps its last value.
     $xp = [ordered]@{}
@@ -173,7 +179,7 @@ function Add-Read($Progress) {
         $delta = $xp[$r] - $prev
         $inMatch = $script:State.Base -and $null -ne $script:State.Base[$r]
         $prevLv = $script:State.Levels[$r]
-        $levelDrop = $null -ne $prevLv -and $Progress[$r].Level -lt $prevLv
+        $levelDrop = $null -ne $prevLv -and $null -ne $Progress[$r].Level -and $Progress[$r].Level -lt $prevLv
         if ($inMatch -and ($delta -lt -$MaxJump -or $levelDrop)) {
             $xp.Remove($r); $script:Pending.Remove($r); $notes += "$r rejected ($prev -> $($Progress[$r].Xp))"
             continue
@@ -194,7 +200,7 @@ function Add-Read($Progress) {
     $fresh = @($xp.Keys | Where-Object { $null -eq $script:State.Base[$_] })
     foreach ($r in $fresh) {
         $script:State.Base[$r] = $xp[$r] - [long]$script:State.PopupSinceRead[$r]
-        $script:State.BaseLevels[$r] = $Progress[$r].Level
+        $script:State.BaseLevels[$r] = Get-ReadLevel $Progress $r
     }
 
     # Whichever role gained the most since the last read is the one being played.
@@ -203,7 +209,7 @@ function Add-Read($Progress) {
         $prev = $script:State.Last[$r]
         if ($fresh -notcontains $r -and $corrected -notcontains $r -and $null -ne $prev -and $xp[$r] - $prev -gt $bestDelta) { $bestDelta = $xp[$r] - $prev; $script:State.Active = $r }
         $script:State.Last[$r]   = $xp[$r]
-        $script:State.Levels[$r] = $Progress[$r].Level
+        $script:State.Levels[$r] = Get-ReadLevel $Progress $r
         if ($null -ne $Progress[$r].NextXp) { $script:State.Next[$r] = [long]$Progress[$r].NextXp }
         $script:State.PopupSinceRead[$r] = 0   # the read is the truth; popups count on from here
     }
