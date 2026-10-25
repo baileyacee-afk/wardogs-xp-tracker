@@ -504,14 +504,19 @@ function Update-PopupTracksSeen([datetime]$Now) { foreach ($t in $script:PopTrac
 function Reset-PopupTracks { $script:PopTracks.Clear() }
 
 # ---------------------------------------------------------------- the cash boxes
-# Reads the boxes at the top right. On the results screen they show the match's cash, banked cash
-# and Wardog level; returns that match cash, or $null for any other screen.
-function Read-ResultsCash([System.Drawing.Bitmap]$Bitmap) {
-    $words = @(Read-OcrWords $Bitmap 2)
-    $text = ($words | Sort-Object X | ForEach-Object Text) -join ' '
-    $amounts = [regex]::Matches($text, '(?<s>-?)\s*\$\s*(?<n>[\d,\.]+)') | ForEach-Object { $n = ConvertTo-PopupNumber $_.Groups['n'].Value; if ($null -ne $n) { if ($_.Groups['s'].Value) { -$n } else { $n } } }
-    $tail = ($words | Sort-Object X | Select-Object -Last 1).Text
-    $level = ConvertTo-PopupNumber $tail
-    if (@($amounts).Count -ge 2 -and $null -ne $level -and $level -ge 6 -and $level -le 999 -and $tail -notmatch '\$') { return @($amounts)[0] }
-    $null
+# Reads the cash shown at the top right while playing: this life's cash (resets on death, negative
+# after buying gear) and banked cash (live). Returns @{ Life; Banked }, or $null when they can't be
+# read. Menus and the results screen show them in boxes next to the Wardog level; those are skipped
+# (OCR rarely reads the boxes, and the results screen's first box is the match's cash, not this life's).
+function Read-CashHud([System.Drawing.Bitmap]$Bitmap) {
+    $words = @(Read-OcrWords $Bitmap 3 | Sort-Object X)
+    $text = ($words | ForEach-Object Text) -join ' '
+    $amounts = @([regex]::Matches($text, '(?<s>-?)\s*\$\s*(?<n>\d{1,3}(?:[,\.]\d{3})*)(?![\d,\.]*\d)') | ForEach-Object {
+        $n = ConvertTo-PopupNumber $_.Groups['n'].Value
+        if ($null -ne $n) { if ($_.Groups['s'].Value) { -$n } else { $n } }
+    })
+    $tail = ($words | Select-Object -Last 1).Text
+    if ($tail -and $tail -notmatch '\$' -and $tail -match '^\d{1,3}$') { return $null }   # Wardog level box: a menu
+    if ($amounts.Count -ne 2 -or $amounts[1] -lt 0) { return $null }
+    @{ Life = [long]$amounts[0]; Banked = [long]$amounts[1] }
 }

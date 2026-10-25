@@ -21,7 +21,7 @@
 param([switch]$Demo)
 
 # Matches the GitHub release tag (v1.0, v1.1, ...) and CHANGELOG.md.
-$AppVersion = '2.1'
+$AppVersion = '2.2'
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -372,8 +372,8 @@ function Update-UI {
     $ui.BtnNext.Content = if ($State.EndRequested) { 'FILE NOW' } else { 'END MATCH' }
 
     # Cash from popups (the game resets its own counter every life).
-    $cash = [long]$State.Cash
-    $ui.TxtCash.Text = (Format-Cash $cash) + $(if ([int]$State.CashUncertain -gt 0) { "  ($($State.CashUncertain) uncertain)" } else { '' })
+    $cash = Get-MatchCash
+    $ui.TxtCash.Text = (Format-Cash $cash) + $(if ($null -eq $State.BankNow -and [int]$State.CashUncertain -gt 0) { "  ($($State.CashUncertain) uncertain)" } else { '' })
     $ui.TxtCash.Foreground = if ($cash -gt 0) { $Brush.Green } elseif ($cash -lt 0) { New-Brush '#E0705A' } else { $Brush.Dim }
 
     # Every role's own progress toward its cap.
@@ -713,9 +713,7 @@ function Invoke-Poll {
         $script:GameNow = [bool]$game   # the popup poll uses this instead of looking up the game itself
         # Time in a match without live tracking makes the deduced bonus less certain.
         if ((Test-MatchActive) -and -not $State.EndRequested -and $script:LiveState -ne 'on') { Add-LiveGap 2 }
-        # Results-screen detection is off: the in-match HUD (per-life cash, banked cash, level) looks
-        # the same to it and would end matches mid-game. END MATCH / Ctrl+Shift+N ends a match.
-        # if ($game -and $script:Tick % 2 -eq 0) { Invoke-ResultsCheck }
+        if ($game -and $Settings.Continuous) { $csw = [Diagnostics.Stopwatch]::StartNew(); Invoke-CashCheck; Add-Perf 'cash' $csw }
         $rect = Get-PanelRect
         if (-not $rect) {
             # Don't know where the panel is yet: search the game window every ~6 s, or all monitors
@@ -861,32 +859,28 @@ function Save-UnparsedRead([System.Drawing.Bitmap]$Bitmap, $Row, [datetime]$Now)
     } catch {}
 }
 
-# The results screen shows the match's cash in the top-right box (next to banked cash and level).
-# Seeing a new one means the match is over.
+# Reads this life's cash and banked cash at the top right while playing, so the match's cash includes
+# gear bought (which has no popup). OCR sometimes drops the minus sign, so a read only counts when
+# the one before it agrees on the banked cash this life started with.
 $script:CashLastGrid = $null
-$script:LastResultsCash = $null
-function Invoke-ResultsCheck {
+$script:CashLastOcr = [datetime]::MinValue
+$script:CashPrevLifeStart = $null
+function Invoke-CashCheck {
+    if ($State.EndRequested) { return }   # after the match: the results payout isn't this match's play
     $bmp = Get-ScreenBitmap (Get-CashRect)
     try {
         $grid = [WdPopup]::WhiteGrid($bmp, 24, 4, $PopupGateWhite, $PopupGateSpread)
-        if ([WdPopup]::GridDiff($grid, $script:CashLastGrid) -lt 0.05) { return }
-        $script:CashLastGrid = $grid
-        $cash = Read-ResultsCash $bmp
-        if ($null -eq $cash -or $cash -eq $script:LastResultsCash) { return }
-        $script:LastResultsCash = $cash
-        Write-Log "results screen: match cash $cash"
-        $age = ((Get-Date) - [datetime]::Parse($State.Start)).TotalMinutes
-        if ($age -lt 2 -or -not (Test-MatchActive)) { return }   # the results of a match already filed
-        Set-ResultsCash $cash
-        if (-not $State.EndRequested) {
-            [void](Request-EndMatch)
-            Reset-PopupTracks
-            Write-Log 'match ended (results screen)'
-            $tray.ShowBalloonTip(6000, 'Match over', 'Open the Wardog Level screen to read your final XP. The tracker works out the end-of-match bonus from it.', 'None')
-        }
-        Update-UI
+        $stale = ((Get-Date) - $script:CashLastOcr).TotalSeconds -ge 10
+        if ([WdPopup]::GridDiff($grid, $script:CashLastGrid) -lt 0.05 -and -not $stale) { return }
+        $script:CashLastGrid = $grid; $script:CashLastOcr = Get-Date
+        $read = Read-CashHud $bmp
+        if (-not $read) { return }
+        $lifeStart = $read.Banked - $read.Life
+        $confirmed = $lifeStart -eq $script:CashPrevLifeStart
+        $script:CashPrevLifeStart = $lifeStart
+        if ($confirmed -and (Set-BankRead $read.Banked $lifeStart)) { Update-UI }
     } catch {
-        Write-Log "results check ERROR $_"
+        Write-Log "cash check ERROR $_"
     } finally { $bmp.Dispose() }
 }
 
@@ -920,7 +914,7 @@ function Invoke-EndMatch {
 
 function Show-Filed($Entry) {
     if (-not $Entry) { return }
-    Write-Log ("match filed: {0} XP, bonus {1}, cash {2}, {3} popups, warnings {4}" -f $Entry.Xp, $Entry.BonusTotal, $Entry.Cash, $Entry.EventCount, @($Entry.Warnings).Count)
+    Write-Log ("match filed: {0} XP, bonus {1}, cash {2} (popups {3}), {4} popups, warnings {5}" -f $Entry.Xp, $Entry.BonusTotal, $Entry.NetCash, $Entry.Cash, $Entry.EventCount, @($Entry.Warnings).Count)
     $bonus = if ($null -ne $Entry.BonusTotal) { "End-of-match bonus: +$('{0:N0}' -f [long]$Entry.BonusTotal) XP$(if ($Entry.Placement) { " ($($Entry.Placement))" })." } else { 'No end-of-match bonus deduced.' }
     if (-not $Demo) { $tray.ShowBalloonTip(6000, 'Match filed', "$bonus Click it under Recent Matches for the full breakdown.", 'None') }
 }
@@ -978,6 +972,7 @@ function Show-MatchDetails($Entry) {
         $events = @($State.Events)
         $Entry = [ordered]@{ Start = $State.Start; End = $null; Xp = [long](@($roles.Values) | Measure-Object -Sum).Sum; Roles = $roles
             Bonus = $null; BonusTotal = $null; Placement = $null; Payout = $null; Cash = [long]$State.Cash; ResultsCash = $State.ResultsCash
+            NetCash = $(if ($null -ne $State.BankStart -and $null -ne $State.BankNow) { Get-MatchCash } else { $null })
             Unparsed = [int]$State.Unparsed; Warnings = @() }
         if ([int]$State.Unparsed -gt 0) { $Entry.Warnings += "$($State.Unparsed) popup reads couldn't be understood so far." }
         if ([long]$State.UnknownXp -gt 0) { $Entry.Warnings += "$($State.UnknownXp) popup XP couldn't be matched to a class." }
@@ -1041,8 +1036,12 @@ function Show-MatchDetails($Entry) {
         Add-Row ('End-of-match bonus (deduced)' + $(if ($Entry.Placement) { ", $($Entry.Placement)" })) ('+{0:N0}' -f [long]$Entry.BonusTotal) $Brush.Gold $Brush.Gold 'SemiBold'
         foreach ($r in $RoleOrder) { if ($Entry.Bonus -and $null -ne $Entry.Bonus[$r] -and [long]$Entry.Bonus[$r] -ne 0) { Add-Row "   $($RoleNames[$r])" ('+{0:N0}' -f [long]$Entry.Bonus[$r]) $Brush.Muted $Brush.Gold } }
     } elseif (-not $live) { Add-Row 'End-of-match bonus (deduced)' 'not available' $Brush.Muted $Brush.Dim }
+    if ($null -ne $Entry.NetCash) {
+        $net = [long]$Entry.NetCash
+        Add-Row 'Cash this match (incl. gear bought)' (Format-Cash $net) $Brush.Muted $(if ($net -ge 0) { $Brush.Green } else { New-Brush '#E0705A' }) 'SemiBold'
+    }
     $cash = [long]$Entry.Cash
-    Add-Row 'Cash (from popups)' (Format-Cash $cash) $Brush.Muted $(if ($cash -ge 0) { $Brush.Green } else { New-Brush '#E0705A' }) 'SemiBold'
+    Add-Row 'Cash from popups' (Format-Cash $cash) $Brush.Muted $(if ($cash -ge 0) { $Brush.Green } else { New-Brush '#E0705A' }) $(if ($null -eq $Entry.NetCash) { 'SemiBold' } else { 'Normal' })
     if ($null -ne $Entry.ResultsCash) { Add-Row 'Cash on the results screen' (Format-Cash ([long]$Entry.ResultsCash)) $Brush.Muted $Brush.Ink }
 
     # Confidence

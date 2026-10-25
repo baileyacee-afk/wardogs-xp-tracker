@@ -60,8 +60,9 @@ Press END MATCH a second time to file a match straight away without the bonus.
 
 - **Wardog level** (all six role levels added up) and levels gained this match.
 - **Match Bonus:** how many of the six classes have maxed their bonus, a symbol and mini bar per
-  class, a line about the class you're playing, and **cash this match** (from the popups; the
-  game's own counter resets every life).
+  class, a line about the class you're playing, and **cash this match**: how much your banked cash
+  (top right) has changed since the match began, so gear you buy counts against it. The game's own
+  red counter resets every life. Until the banked cash has been read, it shows the popup total.
 - **Roles:** each class's XP this match, tier, and bar toward 2,500.
 - **DETAILS** (or click any match under Recent Matches): total XP and cash, the deduced bonus,
   XP and cash grouped by reason with counts, and every popup in order with its time.

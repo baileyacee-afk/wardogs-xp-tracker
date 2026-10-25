@@ -51,7 +51,9 @@ function New-MatchState {
         PopupXp  = [ordered]@{}   # popup XP per role over the whole match
         PopupSinceRead = [ordered]@{}   # popup XP per role since that role's last Wardog Level read
         UnknownXp = 0             # popup XP whose class couldn't be told
-        Cash     = 0              # sum of cash popups
+        Cash     = 0              # sum of cash popups (earnings and small costs; not gear bought)
+        BankStart = $null         # banked cash when the first life read this match began
+        BankNow  = $null          # latest banked cash read; BankNow - BankStart is the match's net cash
         CashUncertain = 0         # cash popups whose "$" was misread
         Unparsed = 0              # popup reads that couldn't be parsed
         LiveGapSeconds = 0        # time this match with continuous mode off or the game not found
@@ -283,6 +285,22 @@ function Request-EndMatch {
 
 function Set-ResultsCash([long]$Amount) { $script:State.ResultsCash = $Amount; Save-TrackerSoon }
 
+# A confirmed read of the cash at the top right. $LifeStart is the banked cash when this life began
+# (banked - this life's cash), so gear bought before the first read still counts against the match.
+function Set-BankRead([long]$Banked, [long]$LifeStart) {
+    if ($null -eq $script:State.BankStart) { $script:State.BankStart = $LifeStart }
+    if ($script:State.BankNow -eq $Banked) { return $false }
+    $script:State.BankNow = $Banked
+    Save-TrackerSoon
+    $true
+}
+
+# The match's net cash: banked cash change (includes gear bought), or the popup sum until the
+# banked cash has been read.
+function Get-MatchCash($S = $script:State) {
+    if ($null -ne $S.BankStart -and $null -ne $S.BankNow) { [long]$S.BankNow - [long]$S.BankStart } else { [long]$S.Cash }
+}
+
 # Files the match into history with its breakdown and starts the next one.
 # The bonus per role = XP after the match (this read) - XP when it ended (last read + popups since).
 function Complete-Match([switch]$NoFinalRead) {
@@ -326,6 +344,7 @@ function Complete-Match([switch]$NoFinalRead) {
         Start = $s.Start; End = $(if ($s.EndRequested) { $s.EndRequested } else { (Get-Date).ToString('o') })
         Xp = $total; Roles = $roles; PopupXp = $popup; Bonus = $bonus; BonusTotal = $bonusTotal
         Payout = $payout; Placement = $placement; Cash = [long]$s.Cash; ResultsCash = $s.ResultsCash
+        NetCash = $(if ($null -ne $s.BankStart -and $null -ne $s.BankNow) { Get-MatchCash $s } else { $null })
         EventCount = @($s.Events).Count; Unparsed = [int]$s.Unparsed; Warnings = $warnings; EventsFile = $eventsFile
     }
     if ($total -gt 0 -or @($s.Events).Count) { $script:History = @(@($entry) + @($script:History) | Select-Object -First 100) }
