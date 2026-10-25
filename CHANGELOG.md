@@ -3,6 +3,20 @@
 Versions match the [GitHub releases](https://github.com/baileyacee-afk/wardogs-xp-tracker/releases).
 The version you're running shows when you hover over the tray icon.
 
+## v3.0 (preview)
+
+The tracker rebuilt as a Windows app in C#/.NET: one self-contained `WardogsXpTracker.exe`.
+Same features and the same data folder as v2.5, so nothing is lost. See [v3/README.md](v3/README.md).
+
+- No console window and no `.cmd`; adds itself to the Start menu.
+- Tray icon always visible: double-click to show; right-click for Show/Hide, **Pause/Resume
+  tracking**, **Start with Windows**, Exit and the usual options.
+- Taskbar button while the window is open; minimizing hides it to the tray.
+- Only one copy runs; starting it again brings the window to the front.
+- Exit stops the background capture thread completely.
+- Screen reading on its own thread; text recognition about 4x faster than in PowerShell
+  (replay of the recorded matches: 19 ms vs 84 ms per read, same results).
+
 ## v2.5
 
 - **Start menu shortcut:** the first time it runs, the tracker adds "Wardogs XP Tracker" (with its

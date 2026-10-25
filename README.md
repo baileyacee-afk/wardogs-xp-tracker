@@ -8,6 +8,12 @@ It reads the XP and cash popups live as you play, keeps a per-match breakdown of
 (kills, assists, revives, building...), and works out the end-of-match bonus afterwards.
 No install needed: it uses PowerShell and Windows' built-in text recognition.
 
+> **New: v3 preview.** The same tracker as a single Windows `.exe` with a tray icon, taskbar
+> button, Pause/Resume and Start with Windows. It's a pre-release on the
+> [Releases page](https://github.com/baileyacee-afk/wardogs-xp-tracker/releases) while it gets
+> tested in real matches; see [v3/README.md](v3/README.md). The PowerShell version below is still
+> the main download.
+
 ## Download
 
 Get the latest version from the **[Releases page](https://github.com/baileyacee-afk/wardogs-xp-tracker/releases/latest)**:

@@ -1,0 +1,4 @@
+# v3 build output
+v3/**/bin/
+v3/**/obj/
+v3/publish/
