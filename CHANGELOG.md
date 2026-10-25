@@ -3,6 +3,32 @@
 Versions match the [GitHub releases](https://github.com/baileyacee-afk/wardogs-xp-tracker/releases).
 The version you're running shows when you hover over the tray icon.
 
+## v2.0
+
+Live popup tracking, a breakdown of every match, and the deduced end-of-match bonus.
+
+- **Live popups:** reads the XP and cash popups under the top-right cash boxes about 3 times a
+  second, running text recognition only when they change. Each popup is counted once (rows are
+  followed as they stack, age and leave), XP is credited to the class from its reason or its
+  symbol, and cash is added up for the match. **Ctrl+Shift+C** turns it on/off.
+- **Wardog Level reads correct drift:** when one comes in, its exact totals replace the popup
+  estimates for that class.
+- **End of match:** the results screen is noticed automatically (or press END MATCH /
+  Ctrl+Shift+N). The next Wardog Level read files the match with the **end-of-match bonus
+  (deduced)** per class and your placement worked out from the per-tier payout.
+- **Match details** (DETAILS button, or click a match under Recent Matches): totals, the deduced
+  bonus, XP and cash by reason with counts, and every popup in order. Each match's popups are
+  saved, so past matches can be opened later.
+- **Confidence notes** on each match when something could have skewed the bonus: unreadable popup
+  reads, live tracking off, XP with no class, uncertain cash amounts, or a bonus that isn't a clean
+  multiple of the payout.
+- **Set popup area...** in the tray to point it at the right spot; unreadable popups are logged
+  and saved as pictures for tuning.
+- Light on CPU: about a quarter of one core during busy fights (around 2% of a 16-thread CPU),
+  less when nothing is popping. The log notes where the time goes once a minute.
+- Class symbols redrawn to match the game's shapes more closely.
+- The sample recorder is gone (Ctrl+Shift+R / Ctrl+Shift+S); thanks for recording!
+
 ## v1.4
 
 - The Match Bonus section now shows **how many of the six roles have maxed their bonus** this

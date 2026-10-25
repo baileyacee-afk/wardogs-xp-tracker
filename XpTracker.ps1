@@ -1,34 +1,34 @@
 #Requires -Version 5.1
 <#
   Wardogs XP Tracker
-  A small always-on-top window that tracks the XP you earn each match toward the
-  2,500 XP end-of-match bonus cap. It reads your XP from the in-game "Wardog Level"
-  screen with Windows' built-in OCR (screenshots only, never the game's memory).
+  A small always-on-top window that tracks the XP each class earns per match toward its
+  2,500 XP end-of-match bonus cap. It reads the XP/cash popups live and the in-game
+  "Wardog Level" screen with Windows' built-in OCR (screenshots only, never the game's
+  memory), keeps a breakdown of every popup per match, and deduces the end-of-match bonus.
 
   Hotkeys:
-    Ctrl+Shift+N          Next match (files the current one into history)
+    Ctrl+Shift+N          End match (the next Wardog Level read files it, with the deduced bonus)
+    Ctrl+Shift+C          Live popup tracking on/off
     Ctrl+Shift+U          Find the Wardog Level panel now (open it in game first)
     Ctrl+Shift+O          Show / hide
     Ctrl+Shift+L          Click-through on/off
     Ctrl+Shift+PageUp     More opaque
     Ctrl+Shift+PageDown   More transparent
     Ctrl+Shift+M          Move to the next corner of the screen (or drag it anywhere)
-    Ctrl+Shift+R          Start / stop recording samples of the top-right corner (temporary)
-    Ctrl+Shift+S          Save a full screenshot of the game (e.g. the end-of-match screen)
 
   -Demo plays back made-up reads (no game needed) using a throwaway data folder.
 #>
 param([switch]$Demo)
 
 # Matches the GitHub release tag (v1.0, v1.1, ...) and CHANGELOG.md.
-$AppVersion = '1.4'
+$AppVersion = '2.0'
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 # The launcher runs this hidden, so surface startup errors in a dialog.
 trap {
-    if ($LogFile) { Add-Content -Path $LogFile -Value "$(Get-Date -Format s) ERROR $_" -Encoding utf8 }
-    [System.Windows.Forms.MessageBox]::Show("Wardogs XP Tracker failed:`n`n$_", 'Wardogs XP Tracker') | Out-Null
+    if ($LogFile) { Add-Content -Path $LogFile -Value "$(Get-Date -Format s) ERROR $_`n$($_.InvocationInfo.PositionMessage)`n$($_.ScriptStackTrace)" -Encoding utf8 }
+    if (-not $env:WD_NO_DIALOG) { [System.Windows.Forms.MessageBox]::Show("Wardogs XP Tracker failed:`n`n$_", 'Wardogs XP Tracker') | Out-Null }
     exit 1
 }
 
@@ -92,7 +92,8 @@ if ($Demo -and (Test-Path $DataDir)) { Remove-Item -Recurse -Force $DataDir }
 New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
 $LogFile = Join-Path $DataDir 'tracker.log'
 Set-Content -Path $LogFile -Value "$(Get-Date -Format s) starting v$AppVersion" -Encoding utf8
-function Write-Log([string]$Text) { Add-Content -Path $LogFile -Value "$(Get-Date -Format s) $Text" -Encoding utf8 }
+# Logging must never stop the tracker (e.g. if the log is open in another program).
+function Write-Log([string]$Text) { try { Add-Content -Path $LogFile -Value "$(Get-Date -Format s) $Text" -Encoding utf8 -ErrorAction Stop } catch {} }
 
 $SettingsFile = Join-Path $DataDir 'settings.json'
 $Settings = [ordered]@{
@@ -100,7 +101,9 @@ $Settings = [ordered]@{
     ClickThrough = $false
     PanelRect    = $null   # "x,y,w,h": where the in-game Wardog Level panel was last found
     PanelRoles   = 0       # how many roles were readable when it was found
-    RecordRect   = $null   # "x,y,w,h": area the sample recorder saves; default is the game's top-right
+    Continuous   = $true   # live popup tracking on
+    PopupPollMs  = 300     # how often the popup area is checked (about 3 times a second)
+    PopupRect    = $null   # "x,y,w,h": where XP/cash popups appear; default is under the top-right cash boxes
     WindowPos    = $null   # "x,y": where you last dragged the window
 }
 if (Test-Path $SettingsFile) {
@@ -113,7 +116,8 @@ function Save-Settings { $Settings | ConvertTo-Json | Set-Content -Path $Setting
 
 . (Join-Path $PSScriptRoot 'GameReader.ps1')
 . (Join-Path $PSScriptRoot 'TrackerCore.ps1')
-. (Join-Path $PSScriptRoot 'Recorder.ps1')
+. (Join-Path $PSScriptRoot 'PopupReader.ps1')
+Initialize-SymbolBank
 Initialize-Tracker $DataDir
 
 # ---------------------------------------------------------------- window
@@ -125,19 +129,18 @@ $tickBorders = (1..$TierCount | ForEach-Object { if ($_ -lt $TierCount) { '<Bord
 # Assault arrowhead, Medic cross, Support wrench, Recon crosshair, Driver steering wheel, Pilot wings.
 # "C" is replaced with the color; Update-UI recolors them afterwards.
 $RoleIcons = @{
-    infantry = '<Path Data="M12,2 L22,21 L12,16.5 L2,21 Z" Fill="C"/>'
-    medic    = '<Path Data="M9,2 H15 V9 H22 V15 H15 V22 H9 V15 H2 V9 H9 Z" Fill="C"/>'
-    support  = '<Ellipse Canvas.Left="12" Canvas.Top="2" Width="10" Height="10" Stroke="C" StrokeThickness="3"/>' +
-               '<Line X1="13.8" Y1="10.2" X2="4.5" Y2="19.5" Stroke="C" StrokeThickness="3.6" StrokeEndLineCap="Round"/>'
-    recon    = '<Ellipse Canvas.Left="4" Canvas.Top="4" Width="16" Height="16" Stroke="C" StrokeThickness="2.2"/>' +
-               '<Line X1="12" Y1="1" X2="12" Y2="8" Stroke="C" StrokeThickness="2.2"/><Line X1="12" Y1="16" X2="12" Y2="23" Stroke="C" StrokeThickness="2.2"/>' +
-               '<Line X1="1" Y1="12" X2="8" Y2="12" Stroke="C" StrokeThickness="2.2"/><Line X1="16" Y1="12" X2="23" Y2="12" Stroke="C" StrokeThickness="2.2"/>' +
-               '<Ellipse Canvas.Left="10.5" Canvas.Top="10.5" Width="3" Height="3" Fill="C"/>'
-    driver   = '<Ellipse Canvas.Left="2.5" Canvas.Top="2.5" Width="19" Height="19" Stroke="C" StrokeThickness="2.6"/>' +
-               '<Ellipse Canvas.Left="9" Canvas.Top="9" Width="6" Height="6" Fill="C"/>' +
-               '<Line X1="4" Y1="12" X2="9.5" Y2="12" Stroke="C" StrokeThickness="2.4"/><Line X1="14.5" Y1="12" X2="20" Y2="12" Stroke="C" StrokeThickness="2.4"/>' +
-               '<Line X1="12" Y1="14.5" X2="12" Y2="20" Stroke="C" StrokeThickness="2.4"/>'
-    pilot    = '<Path Data="M12,10 C9,6.5 5,5 1,5 C2.5,8.5 6,10.5 9.5,11.3 C7,11.8 5.2,13 4.5,14.5 C7.5,14.7 10.2,13.8 12,12.6 C13.8,13.8 16.5,14.7 19.5,14.5 C18.8,13 17,11.8 14.5,11.3 C18,10.5 21.5,8.5 23,5 C19,5 15,6.5 12,10 Z" Fill="C"/>'
+    infantry = '<Path Data="M12,1.5 L22.5,22 L12,15 L1.5,22 Z" Fill="C"/>'
+    medic    = '<Path Data="M8.5,2 H15.5 V8.5 H22 V15.5 H15.5 V22 H8.5 V15.5 H2 V8.5 H8.5 Z" Fill="C"/>'
+    support  = '<Line X1="4.5" Y1="19.5" X2="12.5" Y2="11.5" Stroke="C" StrokeThickness="5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>' +
+               '<Path Data="M18.5,3.7 A5,5 0 1 0 20.7,9.7" Stroke="C" StrokeThickness="4.2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>'
+    recon    = '<Ellipse Canvas.Left="3.5" Canvas.Top="3.5" Width="17" Height="17" Stroke="C" StrokeThickness="2.4"/>' +
+               '<Line X1="12" Y1="1" X2="12" Y2="4.5" Stroke="C" StrokeThickness="2.6"/><Line X1="12" Y1="19.5" X2="12" Y2="23" Stroke="C" StrokeThickness="2.6"/>' +
+               '<Line X1="1" Y1="12" X2="4.5" Y2="12" Stroke="C" StrokeThickness="2.6"/><Line X1="19.5" Y1="12" X2="23" Y2="12" Stroke="C" StrokeThickness="2.6"/>'
+    driver   = '<Ellipse Canvas.Left="2" Canvas.Top="2" Width="20" Height="20" Stroke="C" StrokeThickness="3"/>' +
+               '<Ellipse Canvas.Left="9" Canvas.Top="10" Width="6" Height="6" Fill="C"/>' +
+               '<Line X1="3.5" Y1="11" X2="20.5" Y2="11" Stroke="C" StrokeThickness="3"/>' +
+               '<Line X1="12" Y1="14" X2="12" Y2="21" Stroke="C" StrokeThickness="3"/>'
+    pilot    = '<Path Data="M3,21 C5,13 12,6 22,2.5 C21,6 18.5,8.5 15.5,9.8 C18,9.8 19.5,9.5 20.5,9.2 C19,12.5 16,14.5 12.5,15 C14,15.4 15.2,15.5 16.2,15.4 C13,19 8,20.6 3,21 Z" Fill="C"/>'
 }
 function Get-RoleIconXaml([string]$Role, [double]$Size, [string]$Name = '', [string]$Margin = '0') {
     $n = if ($Name) { ' x:Name="{0}"' -f $Name } else { '' }
@@ -243,7 +246,8 @@ $bonusChips = foreach ($r in $RoleOrder) {
           </StackPanel>
         </StackPanel>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top">
-          <Button x:Name="BtnNext" Style="{StaticResource Flat}" Content="NEXT MATCH" ToolTip="File this match and start a new one (Ctrl+Shift+N)"/>
+          <Button x:Name="BtnDetails" Style="{StaticResource Flat}" Content="DETAILS" Margin="0,0,4,0" ToolTip="Every XP and cash popup this match, grouped by reason"/>
+          <Button x:Name="BtnNext" Style="{StaticResource Flat}" Content="END MATCH" ToolTip="The match is over: the next Wardog Level read files it with the deduced bonus (Ctrl+Shift+N)"/>
           <Button x:Name="BtnHide" Style="{StaticResource Flat}" Content="&#x2013;" Margin="4,0,0,0" ToolTip="Hide (Ctrl+Shift+O)"/>
         </StackPanel>
       </Grid>
@@ -266,6 +270,10 @@ $bonusChips = foreach ($r in $RoleOrder) {
 $($bonusChips -join "`n")
       </UniformGrid>
       <TextBlock x:Name="TxtNote" Text=" " FontSize="12.5" Foreground="$Muted" Margin="14,10,14,0" TextWrapping="Wrap"/>
+      <Grid Margin="14,6,14,0">
+        <TextBlock Text="Cash this match" FontSize="12.5" Foreground="$Muted"/>
+        <TextBlock x:Name="TxtCash" Text="`$0" FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Right"/>
+      </Grid>
 
       <!-- roles -->
       <Border Height="1" Background="#2E271A" Margin="14,12,14,6"/>
@@ -348,9 +356,11 @@ function Update-UI {
         Set-IconColor $ui["${r}_Chip"] $(if ($rmax) { $Brush.Green } elseif ($r -eq $active) { $Brush.Gold } elseif ($g -gt 0) { $Brush.Muted } else { $Brush.Dim })
     }
 
-    # One line about the role you're playing.
+    # One line about the role you're playing (or what to do to finish the match).
+    $live = $Settings.Continuous -and -not $Demo
     $ui.TxtNote.Text =
-        if (-not $State.Base) { 'Open the Wardog Level screen in game to save your starting XP.' }
+        if ($State.EndRequested) { 'Match over. Open the Wardog Level screen to read your final XP; the bonus is worked out from it. (END MATCH again files it without the bonus.)' }
+        elseif (-not $State.Base -and -not $live -and -not @($State.Events).Count) { 'Open the Wardog Level screen in game to save your starting XP.' }
         elseif ($all)         { 'Every role has maxed its bonus this match.' }
         elseif (-not $active) { 'Each role has its own 2,500 XP bonus. Earn XP in a role to start its bar.' }
         else {
@@ -358,6 +368,13 @@ function Update-UI {
             if ($xp -ge $MatchCap) { "Playing $name`: maxed. Switch to another role to earn another bonus." }
             else { "Playing $name`: $('{0:N0}' -f $xp) / $('{0:N0}' -f $MatchCap) XP, $('{0:N0}' -f ($TierSize * ($tier + 1) - $xp)) to tier $($tier + 1)." }
         }
+    $ui.TxtNote.Foreground = if ($State.EndRequested) { $Brush.Gold } else { $Brush.Muted }
+    $ui.BtnNext.Content = if ($State.EndRequested) { 'FILE NOW' } else { 'END MATCH' }
+
+    # Cash from popups (the game resets its own counter every life).
+    $cash = [long]$State.Cash
+    $ui.TxtCash.Text = (Format-Cash $cash) + $(if ([int]$State.CashUncertain -gt 0) { "  ($($State.CashUncertain) uncertain)" } else { '' })
+    $ui.TxtCash.Foreground = if ($cash -gt 0) { $Brush.Green } elseif ($cash -lt 0) { New-Brush '#E0705A' } else { $Brush.Dim }
 
     # Every role's own progress toward its cap.
     $dot = [char]0xB7
@@ -383,7 +400,7 @@ function Update-UI {
     $recent = @($History | Select-Object -First 5)
     if (-not $recent.Count) {
         $tb = New-Object System.Windows.Controls.TextBlock
-        $tb.Text = 'Matches show up here after you press Next Match.'
+        $tb.Text = 'Matches show up here after you press End Match.'
         $tb.FontSize = 12; $tb.Foreground = $Brush.Dim; $tb.Margin = New-Object System.Windows.Thickness 0, 2, 0, 2
         [void]$ui.HistoryList.Children.Add($tb)
     }
@@ -395,7 +412,8 @@ function Update-UI {
         $when = New-Object System.Windows.Controls.TextBlock
         $when.Text = Format-When $m.Start; $when.FontSize = 12.5; $when.Foreground = $Brush.Muted
         $amount = New-Object System.Windows.Controls.TextBlock
-        $amount.Text = '{0:N0} XP' -f [long]$m.Xp; $amount.FontSize = 12.5; $amount.Foreground = $Brush.Muted
+        $amount.Text = ('{0:N0} XP' -f [long]$m.Xp) + $(if ($null -ne $m.BonusTotal) { "  incl. +$('{0:N0}' -f [long]$m.BonusTotal) bonus" } else { '' }) + $(if (@($m.Warnings).Count) { '  !' } else { '' })
+        $amount.FontSize = 12.5; $amount.Foreground = $Brush.Muted
         $amount.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Right
         foreach ($c in $when, $amount) { [void]$top.Children.Add($c) }
         $roles = New-Object System.Windows.Controls.TextBlock
@@ -414,6 +432,13 @@ function Update-UI {
             $roles.Inlines.Add($name); $roles.Inlines.Add($badge)
         }
         [void]$row.Children.Add($top); [void]$row.Children.Add($roles)
+        # Click a past match to see its breakdown.
+        $row.Background = [System.Windows.Media.Brushes]::Transparent
+        $row.Cursor = [System.Windows.Input.Cursors]::Hand
+        $row.ToolTip = 'Show this match''s breakdown'
+        $row.Tag = $m
+        $row.add_MouseLeftButtonUp({ param($s, $e) $e.Handled = $true; Show-MatchDetails $s.Tag })
+        $row.add_MouseLeftButtonDown({ param($s, $e) $e.Handled = $true })   # don't start a window drag
         [void]$ui.HistoryList.Children.Add($row)
     }
 
@@ -424,11 +449,19 @@ function Update-StatusLine {
     $started = "Match started $(([datetime]::Parse($State.Start)).ToString('h:mm tt'))"
     $read = if ($State.LastRead) { "last read $(([datetime]::Parse($State.LastRead)).ToString('h:mm:ss tt'))" } else { 'no reads yet' }
     $lines = @("$started  |  $read")
-    $rec = Get-RecordStatus
-    if ($rec) { $lines += "$rec  (Ctrl+Shift+R to stop)" }
+    $lines += switch ($script:LiveState) {
+        'on'      { "LIVE: reading popups  |  $(@($State.Events).Count) this match" }
+        'off'     { 'Live popup tracking is off (Ctrl+Shift+C)' }
+        'blocked' { 'LIVE paused: this window covers the popup area. Move it (Ctrl+Shift+M).' }
+        default   { 'LIVE paused: waiting for Wardogs' }
+    }
     if ($script:Status) { $lines += $script:Status }
     $ui.TxtStatus.Text = $lines -join "`n"
-    $ui.TxtStatus.Foreground = if ($rec) { New-Brush '#E0705A' } else { $Brush.Dim }
+    $ui.TxtStatus.Foreground = $Brush.Dim
+}
+
+function Format-Cash([long]$Amount) {
+    if ($Amount -lt 0) { '-${0:N0}' -f [Math]::Abs($Amount) } else { '+${0:N0}' -f $Amount }
 }
 
 # ---------------------------------------------------------------- placement, show/hide, opacity
@@ -564,14 +597,13 @@ function Read-Area([System.Drawing.Rectangle]$Rect) {
 }
 
 function Use-Read($Progress) {
-    # While recording samples, note every Wardog Level read so popups can be matched to roles later.
-    if ($script:Rec) { Write-RecLog ('read: ' + (($Progress.Keys | ForEach-Object { "$_=$($Progress[$_].Xp)(Lv$($Progress[$_].Level))" }) -join ' ')) }
     $res = Add-Read $Progress
     if ($res.Note -and $res.Note -ne $script:LastNote) { Write-Log "read: $($res.Note)" }
     $script:LastNote = $res.Note
     if (-not $res.Accepted) { return }
     foreach ($n in $res.NewTiers) { Show-TierAlert $n.Role $n.Tier }
     $script:Status = ''
+    if ($res.Filed) { Show-Filed $res.Filed }
     Update-UI
 }
 
@@ -671,10 +703,17 @@ function Invoke-ManualFind {
 function Invoke-Poll {
     if ($script:Busy) { return }
     $script:Busy = $true
+    $sw = [Diagnostics.Stopwatch]::StartNew()
     try {
         $script:Tick++
+        Save-TrackerIfDue
+        Write-PerfLog
         if ($Demo) { Invoke-DemoStep; return }
         $game = Get-GameProcess
+        $script:GameNow = [bool]$game   # the popup poll uses this instead of looking up the game itself
+        # Time in a match without live tracking makes the deduced bonus less certain.
+        if ((Test-MatchActive) -and -not $State.EndRequested -and $script:LiveState -ne 'on') { Add-LiveGap 2 }
+        if ($game -and $script:Tick % 2 -eq 0) { $rsw = [Diagnostics.Stopwatch]::StartNew(); Invoke-ResultsCheck; Add-Perf 'results' $rsw }
         $rect = Get-PanelRect
         if (-not $rect) {
             # Don't know where the panel is yet: search the game window every ~6 s, or all monitors
@@ -685,9 +724,24 @@ function Invoke-Poll {
             if ($script:Tick % $(if ($game) { 3 } else { 5 }) -eq 0) { Find-Panel }
             return
         }
-        # Known panel spot: read it every 2 s while the game is detected, every 6 s otherwise.
+        # Known panel spot: check it every 2 s while the game is detected, every 6 s otherwise, and
+        # only run OCR when its white text changed (or every 10 s), so a closed panel costs nothing.
         if (-not $game -and $script:Tick % 3 -ne 0) { return }
-        $progress = Read-Area $rect
+        $bmp = Get-Capture $rect
+        try {
+            $grid = [WdPopup]::WhiteGrid($bmp, 24, 16, $PopupGateWhite, $PopupGateSpread)
+            $changed = [WdPopup]::GridDiff($grid, $script:PanelLastGrid) -ge 0.03
+            $since = ((Get-Date) - $script:PanelLastOcr).TotalSeconds
+            # While the panel is closed the game scene behind it keeps changing, so look again
+            # only every 6 s until it shows up.
+            $wait = if ($script:PanelOpen) { 0 } else { 6 }
+            if ([WdPopup]::Sum($grid) -lt 30 -or $since -lt $wait -or (-not $changed -and $since -lt 10)) { return }
+            $script:PanelLastGrid = $grid; $script:PanelLastOcr = Get-Date
+            $osw = [Diagnostics.Stopwatch]::StartNew()
+            $progress = Get-RoleProgress @(Read-OcrWords $bmp)
+            Add-Perf 'panel-ocr' $osw
+        } finally { $bmp.Dispose() }
+        $script:PanelOpen = $progress.Count -gt 0
         if ($progress.Count -eq 0) { return }   # panel not open right now
         $roles = ($progress.Keys | Sort-Object) -join ','
         if ($roles -ne $script:LastRoles) { Write-Log "reading roles: $roles"; $script:LastRoles = $roles }
@@ -706,68 +760,402 @@ function Invoke-Poll {
         Write-Log "poll ERROR $_"
         $msg = "Problem reading the screen: $($_.Exception.Message)"
         if ($script:Status -ne $msg) { Set-Status $msg }
-    } finally { $script:Busy = $false }
+    } finally { $script:Busy = $false; Add-Perf 'panel-and-results' $sw }
 }
 
-# ---------------------------------------------------------------- sample recorder controls
-function Update-RecordMenu {
-    $miRecToggle.Text = if ($script:Rec) { 'Stop recording' } else { 'Start recording' }
+# ---------------------------------------------------------------- live popups
+# Time spent per kind of work, written to the log once a minute (for keeping CPU use low).
+$script:Perf = @{}
+$script:PerfSince = Get-Date
+function Add-Perf([string]$Name, [System.Diagnostics.Stopwatch]$Sw) {
+    $p = $script:Perf[$Name]; if (-not $p) { $p = @{ N = 0; Ms = 0 }; $script:Perf[$Name] = $p }
+    $p.N++; $p.Ms += $Sw.Elapsed.TotalMilliseconds
+}
+function Write-PerfLog {
+    $secs = ((Get-Date) - $script:PerfSince).TotalSeconds
+    if ($secs -lt 60) { return }
+    $parts = foreach ($k in ($script:Perf.Keys | Sort-Object)) { "{0} {1}x {2:N0}ms" -f $k, $script:Perf[$k].N, $script:Perf[$k].Ms }
+    $total = ($script:Perf.Values | ForEach-Object { $_.Ms } | Measure-Object -Sum).Sum
+    Write-Log ("perf (last {0:N0}s, {1:N1}% of a core): {2}" -f $secs, (100 * $total / 1000 / $secs), ($parts -join '; '))
+    $script:Perf = @{}; $script:PerfSince = Get-Date
+}
+
+$script:LiveState = 'waiting'   # on | off | blocked | waiting
+$script:PanelLastGrid = $null
+$script:PanelLastOcr = [datetime]::MinValue
+$script:PanelOpen = $false
+$script:GameNow = $false
+$script:PopLastGrid = $null
+$script:PopLastOcr = [datetime]::MinValue
+$script:UnparsedSeen = @{}
+
+# (not "$State": functions called from here would see it instead of the match state)
+function Set-LiveState([string]$Value) {
+    if ($script:LiveState -eq $Value) { return }
+    $script:LiveState = $Value
     Update-StatusLine
 }
 
-# Ctrl+Shift+R
-function Switch-Recording {
-    if ($script:Rec) {
-        $n = $script:Rec.Frames
-        Stop-Recording
-        $tray.ShowBalloonTip(3000, 'Recording stopped', "$n frames saved.", 'None')
-    } else {
-        Start-Recording
-        $tray.ShowBalloonTip(3000, 'Recording samples', 'Saving the top-right corner while you play. Open the Wardog Level screen now and then. Ctrl+Shift+R stops it.', 'None')
-    }
-    Update-RecordMenu
-}
-
-# Ctrl+Shift+S
-function Save-ManualScreenshot {
+# Runs every PopupPollMs (about 3 times a second): grabs the small popup area, and only runs OCR
+# when its white text changed.
+function Invoke-PopupPoll {
+    if ($Demo) { return }
+    if (-not $Settings.Continuous) { Set-LiveState 'off'; return }
+    if (-not $script:GameNow) { Set-LiveState 'waiting'; return }
+    $rect = Get-PopupRect
+    if (-not $script:Hidden -and $rect.IntersectsWith((Get-OwnRect))) { Set-LiveState 'blocked'; return }
+    Set-LiveState 'on'
+    $now = Get-Date
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    $bmp = Get-ScreenBitmap $rect
+    $ocr = $false
     try {
-        $path = Save-FullScreenshot -Manual
-        $tray.ShowBalloonTip(2000, 'Screenshot saved', (Split-Path $path -Leaf), 'None')
+        $grid = [WdPopup]::WhiteGrid($bmp, 24, 16, $PopupGateWhite, $PopupGateSpread)
+        $diff = [WdPopup]::GridDiff($grid, $script:PopLastGrid)
+        $since = ($now - $script:PopLastOcr).TotalSeconds
+        if (($diff -lt $PopupGateDiff -and $since -lt $PopupForceOcr) -or $since -lt $PopupMinOcrGap) { Update-PopupTracksSeen $now; return }
+        $script:PopLastGrid = $grid
+        if ($script:PopTracks.Count -eq 0 -and -not (Test-PopupsShowing $bmp)) { return }   # no popups showing
+        $script:PopLastOcr = $now
+        $ocr = $true
+        $rows = @(Read-PopupArea $bmp)
+        $res = Update-PopupTracks $rows $now
+        $changed = $false
+        foreach ($t in $res.New) {
+            $out = Add-PopupEvent $t.Kind $t.Amount $t.Reason $t.Role $t.Uncertain
+            $t.EventId = $out.Event.Id
+            foreach ($n in $out.NewTiers) { Show-TierAlert $n.Role $n.Tier }
+            $changed = $true
+        }
+        foreach ($t in $res.Changed) {
+            if (-not $t.EventId) { continue }
+            foreach ($n in (Update-PopupEvent $t.EventId $t.Amount $t.Uncertain)) { Show-TierAlert $n.Role $n.Tier }
+            $changed = $true
+        }
+        foreach ($r in $rows | Where-Object Kind -eq 'unparsed') { Save-UnparsedRead $bmp $r $now }
+        if ($changed) { Update-UI }
     } catch {
-        Write-Log "screenshot ERROR $_"
-        Set-Status "Couldn't save the screenshot: $($_.Exception.Message)"
-    }
+        Write-Log "popup ERROR $_"
+    } finally { $bmp.Dispose(); Add-Perf $(if ($ocr) { 'popup-ocr' } else { 'popup-check' }) $sw }
 }
 
-function Start-Next {
-    Start-NextMatch
-    Write-Log 'next match'
+# A popup row with numbers that couldn't be understood: log it once, keep a picture for tuning
+# (the last 50), and count it toward the match's confidence warning. Rows that are just a misread
+# of a row already being followed don't count.
+function Save-UnparsedRead([System.Drawing.Bitmap]$Bitmap, $Row, [datetime]$Now) {
+    if ($script:PopTracks | Where-Object { [Math]::Abs($_.Y - $Row.Y) -lt 0.8 * $Row.H }) { return }
+    $last = $script:UnparsedSeen[$Row.Text]
+    if ($last -and ($Now - $last).TotalSeconds -lt 6) { return }
+    $script:UnparsedSeen[$Row.Text] = $Now
+    Add-UnparsedRead
+    Write-Log "unparsed popup: $($Row.Text)"
+    try {
+        $dir = Join-Path $DataDir 'unparsed'
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        $y = [Math]::Max(0, [int]($Row.Y - 0.6 * $Row.H)); $h = [Math]::Min($Bitmap.Height - $y, [int](2.2 * $Row.H))
+        $crop = $Bitmap.Clone((New-Object System.Drawing.Rectangle 0, $y, $Bitmap.Width, $h), [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
+        $crop.Save((Join-Path $dir ($Now.ToString('yyyyMMdd-HHmmss-fff') + '.png')), [System.Drawing.Imaging.ImageFormat]::Png); $crop.Dispose()
+        Get-ChildItem $dir -Filter '*.png' | Sort-Object Name -Descending | Select-Object -Skip 50 | Remove-Item -Force
+    } catch {}
+}
+
+# The results screen shows the match's cash in the top-right box (next to banked cash and level).
+# Seeing a new one means the match is over.
+$script:CashLastGrid = $null
+$script:LastResultsCash = $null
+function Invoke-ResultsCheck {
+    $bmp = Get-ScreenBitmap (Get-CashRect)
+    try {
+        $grid = [WdPopup]::WhiteGrid($bmp, 24, 4, $PopupGateWhite, $PopupGateSpread)
+        if ([WdPopup]::GridDiff($grid, $script:CashLastGrid) -lt 0.05) { return }
+        $script:CashLastGrid = $grid
+        $cash = Read-ResultsCash $bmp
+        if ($null -eq $cash -or $cash -eq $script:LastResultsCash) { return }
+        $script:LastResultsCash = $cash
+        Write-Log "results screen: match cash $cash"
+        $age = ((Get-Date) - [datetime]::Parse($State.Start)).TotalMinutes
+        if ($age -lt 2 -or -not (Test-MatchActive)) { return }   # the results of a match already filed
+        Set-ResultsCash $cash
+        if (-not $State.EndRequested) {
+            [void](Request-EndMatch)
+            Reset-PopupTracks
+            Write-Log 'match ended (results screen)'
+            $tray.ShowBalloonTip(6000, 'Match over', 'Open the Wardog Level screen to read your final XP. The tracker works out the end-of-match bonus from it.', 'None')
+        }
+        Update-UI
+    } catch {
+        Write-Log "results check ERROR $_"
+    } finally { $bmp.Dispose() }
+}
+
+# Ctrl+Shift+C / tray
+function Switch-Continuous {
+    $Settings.Continuous = -not $Settings.Continuous; Save-Settings
+    $miLive.Checked = $Settings.Continuous
+    Reset-PopupTracks
+    if ($Settings.Continuous) { $script:PopLastGrid = $null; Set-LiveState 'waiting' } else { Set-LiveState 'off' }
+    $tray.ShowBalloonTip(2000, 'Wardogs XP Tracker', $(if ($Settings.Continuous) { 'Live popup tracking on.' } else { 'Live popup tracking off.' }), 'None')
+}
+
+# ---------------------------------------------------------------- end of match
+# Ctrl+Shift+N / END MATCH: marks the match over; the next Wardog Level read files it with the bonus.
+# Pressing it again files it right away, without the bonus.
+function Invoke-EndMatch {
+    if (-not $State.EndRequested) {
+        if (-not (Test-MatchActive)) { Set-Status 'Nothing to file yet: no XP or popups this match.'; return }
+        [void](Request-EndMatch)
+        Reset-PopupTracks
+        Write-Log 'match ended'
+        $tray.ShowBalloonTip(5000, 'Match ended', 'Open the Wardog Level screen to read your final XP. The tracker works out the end-of-match bonus from it.', 'None')
+    } else {
+        Show-Filed (Complete-Match -NoFinalRead)
+    }
     $ui.Frame.BorderThickness = New-Object System.Windows.Thickness 1
     $ui.Frame.BorderBrush = New-Brush '#4A3F28'
     $script:Status = ''
     Update-UI
 }
 
-# ---------------------------------------------------------------- demo mode (made-up reads)
+function Show-Filed($Entry) {
+    if (-not $Entry) { return }
+    Write-Log ("match filed: {0} XP, bonus {1}, cash {2}, {3} popups, warnings {4}" -f $Entry.Xp, $Entry.BonusTotal, $Entry.Cash, $Entry.EventCount, @($Entry.Warnings).Count)
+    $bonus = if ($null -ne $Entry.BonusTotal) { "End-of-match bonus: +$('{0:N0}' -f [long]$Entry.BonusTotal) XP$(if ($Entry.Placement) { " ($($Entry.Placement))" })." } else { 'No end-of-match bonus deduced.' }
+    if (-not $Demo) { $tray.ShowBalloonTip(6000, 'Match filed', "$bonus Click it under Recent Matches for the full breakdown.", 'None') }
+}
+
+# ---------------------------------------------------------------- demo mode (made-up match)
 $script:DemoXp = [ordered]@{ infantry = 130627; medic = 269872; support = 118408; recon = 43655; driver = 45030; pilot = 37159 }
 $script:DemoLv = [ordered]@{ infantry = 21; medic = 28; support = 20; recon = 13; driver = 14; pilot = 12 }
 $script:DemoNext = [ordered]@{ infantry = 145400; medic = 288450; support = 127200; recon = 43750; driver = 54750; pilot = 37500 }
-$script:DemoGains = @(@{}, @{ medic = 325 }, @{ medic = 410 }, @{ medic = 380 }, @{ medic = 520 },
-    @{ medic = 450 }, @{ medic = 540 }, @{ infantry = 300; pilot = 450 }, @{ infantry = 420 }, @{ infantry = 260 })
+$script:DemoSteps = @(
+    'read',
+    @(@('xp', 250, 'KILL', 'infantry'), @('cash', 160, 'CONTROL ZONE PRESENCE', '')),
+    @(@('xp', 200, 'KILL ASSIST', 'infantry'), @('xp', 8, 'BUILDING', 'support'), @('xp', 8, 'BUILDING', 'support')),
+    @(@('xp', 250, 'REVIVED TEAMMATE', 'medic'), @('cash', 375, 'REVIVED PLAYER ASSIST', '')),
+    @(@('xp', 525, 'SUPPLIES DELIVERED', 'driver'), @('cash', -20, 'VEHICLE REFUELLING', '')),
+    @(@('xp', 250, 'KILL', 'infantry'), @('xp', 250, 'KILL', 'infantry'), @('xp', 150, 'SPOTTED TARGET DESTROYED', 'recon')),
+    @(@('xp', 400, 'SUPPLIES DELIVERED', 'pilot'), @('xp', 25, 'TACTICAL DEPLOYMENT', 'pilot')),
+    @(@('xp', 250, 'KILL', 'infantry'), @('xp', 200, 'KILL ASSIST', 'infantry'), @('cash', 250, 'CONTROL ZONE ENTERED', '')),
+    @(@('xp', 250, 'KILL', 'infantry'), @('xp', 250, 'KILL', 'infantry'), @('xp', 180, 'SUPPLIES DEPOSITED', 'support')),
+    @(@('xp', 250, 'KILL', 'infantry'), @('xp', 250, 'KILL', 'infantry'), @('xp', 250, 'KILL', 'infantry')),
+    'end', 'final')
 function Invoke-DemoStep {
+    $script:LiveState = 'on'
     $i = $script:Tick - 1
-    # After the scripted gains: file the match into history, then take one read to start the next.
-    if ($i -eq $script:DemoGains.Count) { Start-Next; return }
-    if ($i -gt $script:DemoGains.Count + 1) { return }
-    if ($i -gt $script:DemoGains.Count) { $i = 0 }
-    foreach ($kv in $script:DemoGains[$i].GetEnumerator()) {
-        $r = $kv.Key
-        $script:DemoXp[$r] += $kv.Value
-        if ($script:DemoXp[$r] -ge $script:DemoNext[$r]) { $script:DemoLv[$r]++; $script:DemoNext[$r] += 12000 }
+    if ($i -ge $script:DemoSteps.Count) { return }
+    $step = $script:DemoSteps[$i]
+    if ($step -eq 'end') { Invoke-EndMatch; return }
+    if ($step -is [array]) {
+        foreach ($p in $step) {
+            $role = if ($p[3]) { $p[3] } else { $null }
+            $out = Add-PopupEvent $p[0] $p[1] $p[2] $role $false
+            foreach ($n in $out.NewTiers) { Show-TierAlert $n.Role $n.Tier }
+        }
+        Update-UI
+        return
     }
+    # 'read' at the start; 'final' after the match: the bonus is 700 XP per tier (2nd place)
+    if ($step -eq 'final') {
+        foreach ($r in $RoleOrder) { $script:DemoXp[$r] += [long]$State.EndGains[$r] + 700 * (Get-Tier ([long]$State.EndGains[$r])) }
+    }
+    foreach ($r in $RoleOrder) { while ($script:DemoXp[$r] -ge $script:DemoNext[$r]) { $script:DemoLv[$r]++; $script:DemoNext[$r] += 12000 } }
     $p = [ordered]@{}
     foreach ($r in $RoleOrder) { $p[$r] = [pscustomobject]@{ Level = $script:DemoLv[$r]; Xp = $script:DemoXp[$r]; NextXp = $script:DemoNext[$r] } }
     Use-Read $p
+    if ($step -eq 'final' -and @($History).Count) { Show-MatchDetails $History[0] }
+}
+
+# ---------------------------------------------------------------- match details window
+# One match's breakdown: totals, the deduced bonus, totals by reason, and every popup in order.
+# $Entry is a filed match from history, or $null for the match in progress.
+function Show-MatchDetails($Entry) {
+    $live = -not $Entry
+    if ($live) {
+        $gains = Get-RoleGains
+        $roles = [ordered]@{}; foreach ($r in $RoleOrder) { if ($gains[$r] -gt 0) { $roles[$r] = $gains[$r] } }
+        $events = @($State.Events)
+        $Entry = [ordered]@{ Start = $State.Start; End = $null; Xp = [long](@($roles.Values) | Measure-Object -Sum).Sum; Roles = $roles
+            Bonus = $null; BonusTotal = $null; Placement = $null; Payout = $null; Cash = [long]$State.Cash; ResultsCash = $State.ResultsCash
+            Unparsed = [int]$State.Unparsed; Warnings = @() }
+        if ([int]$State.Unparsed -gt 0) { $Entry.Warnings += "$($State.Unparsed) popup reads couldn't be understood so far." }
+        if ([long]$State.UnknownXp -gt 0) { $Entry.Warnings += "$($State.UnknownXp) popup XP couldn't be matched to a class." }
+        if ([int]$State.CashUncertain -gt 0) { $Entry.Warnings += "$($State.CashUncertain) cash amounts are uncertain (the `$ sign was misread)." }
+    } else { $events = @(Get-MatchEvents $Entry) }
+
+    $start = [datetime]::Parse($Entry.Start)
+    $when = "$(Format-When $Entry.Start)" + $(if ($Entry.End) { " - $(([datetime]::Parse($Entry.End)).ToString('h:mm tt'))" } else { '  (in progress)' })
+    [xml]$x = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Match details" Width="440" SizeToContent="Height" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Topmost="True" ShowInTaskbar="False" ResizeMode="NoResize" FontFamily="Bahnschrift, Segoe UI" Foreground="$Ink" UseLayoutRounding="True">
+  <Border CornerRadius="6" BorderBrush="#4A3F28" BorderThickness="1" Background="#FF14100A">
+    <DockPanel>
+      <Grid DockPanel.Dock="Top" x:Name="DHead" Background="#01000000" Margin="16,12,10,6" Cursor="SizeAll">
+        <StackPanel>
+          <TextBlock Text="//MATCH DETAILS" FontSize="11" FontWeight="SemiBold" Foreground="$Gold"/>
+          <TextBlock x:Name="DWhen" FontSize="16" FontWeight="SemiBold"/>
+        </StackPanel>
+        <Button x:Name="DClose" Content="CLOSE" HorizontalAlignment="Right" VerticalAlignment="Top" Foreground="$Muted" Background="Transparent" BorderBrush="#4A3F28" Padding="8,3" FontSize="11" Cursor="Hand"/>
+      </Grid>
+      <ScrollViewer x:Name="DScroll" VerticalScrollBarVisibility="Auto" Margin="16,0,8,14">
+        <StackPanel x:Name="DBody" Margin="0,0,8,0"/>
+      </ScrollViewer>
+    </DockPanel>
+  </Border>
+</Window>
+"@
+    $w = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $x))
+    $body = $w.FindName('DBody')
+    $w.FindName('DWhen').Text = $when
+    $w.FindName('DClose').add_Click({ $w.Close() }.GetNewClosure())
+    $w.FindName('DHead').add_MouseLeftButtonDown({ try { $w.DragMove() } catch {} }.GetNewClosure())
+    $w.FindName('DScroll').MaxHeight = [Math]::Max(300, [System.Windows.SystemParameters]::WorkArea.Height * 0.8)
+
+    function Add-Text([string]$Text, [double]$Size = 13, $Color = $Brush.Ink, [string]$Weight = 'Normal', [double]$Top = 0) {
+        $t = New-Object System.Windows.Controls.TextBlock
+        $t.Text = $Text; $t.FontSize = $Size; $t.Foreground = $Color; $t.TextWrapping = 'Wrap'
+        $t.FontWeight = [System.Windows.FontWeights]::$Weight
+        $t.Margin = New-Object System.Windows.Thickness 0, $Top, 0, 0
+        [void]$body.Children.Add($t)
+    }
+    function Add-Row([string]$Left, [string]$Right, $LeftColor = $Brush.Ink, $RightColor = $Brush.Ink, [string]$Weight = 'Normal') {
+        $g = New-Object System.Windows.Controls.Grid
+        $g.Margin = New-Object System.Windows.Thickness 0, 2, 0, 0
+        $l = New-Object System.Windows.Controls.TextBlock; $l.Text = $Left; $l.Foreground = $LeftColor; $l.FontSize = 13; $l.TextTrimming = 'CharacterEllipsis'; $l.Margin = New-Object System.Windows.Thickness 0, 0, 90, 0
+        $r = New-Object System.Windows.Controls.TextBlock; $r.Text = $Right; $r.Foreground = $RightColor; $r.FontSize = 13; $r.HorizontalAlignment = 'Right'
+        $l.FontWeight = $r.FontWeight = [System.Windows.FontWeights]::$Weight
+        [void]$g.Children.Add($l); [void]$g.Children.Add($r)
+        [void]$body.Children.Add($g)
+    }
+    function Add-Heading([string]$Text) { Add-Text $Text 11 $Brush.Gold 'SemiBold' 14 }
+
+    # Summary
+    Add-Heading 'SUMMARY'
+    Add-Row 'Total XP' ('+{0:N0}' -f [long]$Entry.Xp) $Brush.Muted $Brush.Ink 'SemiBold'
+    foreach ($r in $RoleOrder) {
+        if ($Entry.Roles -and $null -ne $Entry.Roles[$r]) { $g = [long]$Entry.Roles[$r]; $t = Get-Tier $g; Add-Row "   $($RoleNames[$r])" ('+{0:N0}  {1}' -f $g, $(if ($t -ge $TierCount) { 'MAX' } else { "T$t" })) $Brush.Muted $(if ($t -ge $TierCount) { $Brush.Green } else { $Brush.Ink }) }
+    }
+    if ($null -ne $Entry.BonusTotal) {
+        Add-Row ('End-of-match bonus (deduced)' + $(if ($Entry.Placement) { ", $($Entry.Placement)" })) ('+{0:N0}' -f [long]$Entry.BonusTotal) $Brush.Gold $Brush.Gold 'SemiBold'
+        foreach ($r in $RoleOrder) { if ($Entry.Bonus -and $null -ne $Entry.Bonus[$r] -and [long]$Entry.Bonus[$r] -ne 0) { Add-Row "   $($RoleNames[$r])" ('+{0:N0}' -f [long]$Entry.Bonus[$r]) $Brush.Muted $Brush.Gold } }
+    } elseif (-not $live) { Add-Row 'End-of-match bonus (deduced)' 'not available' $Brush.Muted $Brush.Dim }
+    $cash = [long]$Entry.Cash
+    Add-Row 'Cash (from popups)' (Format-Cash $cash) $Brush.Muted $(if ($cash -ge 0) { $Brush.Green } else { New-Brush '#E0705A' }) 'SemiBold'
+    if ($null -ne $Entry.ResultsCash) { Add-Row 'Cash on the results screen' (Format-Cash ([long]$Entry.ResultsCash)) $Brush.Muted $Brush.Ink }
+
+    # Confidence
+    if (@($Entry.Warnings).Count) {
+        Add-Heading 'CONFIDENCE'
+        foreach ($wn in $Entry.Warnings) { Add-Text "!  $wn" 12.5 (New-Brush '#E0B05A') 'Normal' 2 }
+    }
+
+    # By reason
+    $xpEv = @($events | Where-Object { $_.Kind -eq 'xp' }); $cashEv = @($events | Where-Object { $_.Kind -eq 'cash' })
+    # (events can be dictionaries, which Measure-Object can't read by name, so sum them directly)
+    function Get-AmountSum($List) { $t = [long]0; foreach ($e in @($List)) { $t += [long]$e.Amount }; $t }
+    foreach ($grp in @(@('XP BY REASON', $xpEv, 'xp'), @('CASH BY REASON', $cashEv, 'cash'))) {
+        if (-not @($grp[1]).Count) { continue }
+        Add-Heading $grp[0]
+        foreach ($g in (@($grp[1]) | Group-Object { $_.Reason } | Sort-Object { -[Math]::Abs((Get-AmountSum $_.Group)) })) {
+            $sum = Get-AmountSum $g.Group
+            $label = if ($g.Name) { (Get-Culture).TextInfo.ToTitleCase($g.Name.ToLower()) } else { 'Unlabeled' }
+            $amount = if ($grp[2] -eq 'xp') { '+{0:N0} XP' -f $sum } else { Format-Cash $sum }
+            Add-Row "$label  x$($g.Count)" $amount $Brush.Ink $Brush.Ink
+        }
+    }
+
+    # Every popup in order
+    if ($events.Count) {
+        Add-Heading "EVERY POPUP ($($events.Count))"
+        foreach ($e in $events) {
+            $t = ([datetime]::Parse($e.T)).ToString('h:mm:ss')
+            $label = (Get-Culture).TextInfo.ToTitleCase(([string]$e.Reason).ToLower())
+            if ($e.Kind -eq 'xp') {
+                $who = if ($e.Role) { $RoleNames[$e.Role] } else { '?' }
+                Add-Row "$t   $label" ('+{0:N0} XP  {1}' -f [long]$e.Amount, $who) $Brush.Muted $Brush.Ink
+            } else {
+                Add-Row "$t   $label" ((Format-Cash ([long]$e.Amount)) + $(if ($e.Uncertain) { ' ?' } else { '' })) $Brush.Muted $(if ([long]$e.Amount -ge 0) { $Brush.Green } else { New-Brush '#E0705A' })
+            }
+        }
+    } else { Add-Text 'No popups were recorded for this match.' 12.5 $Brush.Dim 'Normal' 14 }
+
+    # Open next to the tracker, on the same screen.
+    $w.WindowStartupLocation = 'Manual'
+    $w.Left = [Math]::Max(0, $win.Left - 450); $w.Top = $win.Top
+    if ($w.Left + 10 -lt [System.Windows.SystemParameters]::VirtualScreenLeft) { $w.Left = $win.Left + $win.ActualWidth + 10 }
+    $w.Show()
+}
+
+# ---------------------------------------------------------------- popup area picker
+# Dims the game's screen; drag a box around where the XP/cash popups appear, then Enter (Esc cancels).
+function Show-AreaPicker([System.Drawing.Rectangle]$Current) {
+    $screen = [System.Windows.Forms.Screen]::FromRectangle($Current)
+    $b = $screen.Bounds
+    $s = Get-Scale
+    [xml]$x = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None" AllowsTransparency="True" Background="#80000000" Topmost="True" ShowInTaskbar="False" Cursor="Cross">
+  <Grid>
+    <Canvas x:Name="Board" Background="#01000000">
+      <Rectangle x:Name="Sel" Stroke="$Gold" StrokeThickness="2" Fill="#2AD8B45A"/>
+    </Canvas>
+    <Border VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,80,0,0" Background="#E614100A" BorderBrush="#4A3F28" BorderThickness="1" CornerRadius="4" Padding="14,10" Cursor="Arrow">
+      <StackPanel>
+        <TextBlock FontFamily="Bahnschrift, Segoe UI" FontSize="15" Foreground="$Ink" TextAlignment="Center"
+                   Text="Drag a box around where the XP and cash popups appear (under the cash boxes, top right).&#x0a;Make it tall enough for a full stack of popups. Enter saves; Esc or right-click cancels."/>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,10,0,0">
+          <Button x:Name="PickSave" Content="SAVE" Padding="16,4" Margin="0,0,8,0" Foreground="#15110A" Background="$Gold" BorderThickness="0" FontFamily="Bahnschrift, Segoe UI" FontWeight="SemiBold"/>
+          <Button x:Name="PickCancel" Content="CANCEL" Padding="12,4" Foreground="$Ink" Background="Transparent" BorderBrush="#4A3F28" FontFamily="Bahnschrift, Segoe UI"/>
+        </StackPanel>
+      </StackPanel>
+    </Border>
+  </Grid>
+</Window>
+"@
+    $w = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $x))
+    $w.Left = $b.X / $s; $w.Top = $b.Y / $s; $w.Width = $b.Width / $s; $w.Height = $b.Height / $s
+    $sel = $w.FindName('Sel'); $board = $w.FindName('Board')
+    $pick = @{ Start = $null; Rect = $null; Result = $null }
+    $place = {
+        param($x1, $y1, $x2, $y2)
+        $l = [Math]::Min($x1, $x2); $t = [Math]::Min($y1, $y2)
+        [System.Windows.Controls.Canvas]::SetLeft($sel, $l); [System.Windows.Controls.Canvas]::SetTop($sel, $t)
+        $sel.Width = [Math]::Abs($x2 - $x1); $sel.Height = [Math]::Abs($y2 - $y1)
+        $pick.Rect = @($l, $t, $sel.Width, $sel.Height)
+    }
+    # Show the current area to start with.
+    & $place (($Current.X - $b.X) / $s) (($Current.Y - $b.Y) / $s) (($Current.Right - $b.X) / $s) (($Current.Bottom - $b.Y) / $s)
+    $board.add_MouseLeftButtonDown({ param($o, $e) $p = $e.GetPosition($board); $pick.Start = $p; $board.CaptureMouse() | Out-Null }.GetNewClosure())
+    $board.add_MouseMove({ param($o, $e) if ($pick.Start) { $p = $e.GetPosition($board); & $place $pick.Start.X $pick.Start.Y $p.X $p.Y } }.GetNewClosure())
+    $board.add_MouseLeftButtonUp({ param($o, $e) $pick.Start = $null; $board.ReleaseMouseCapture() }.GetNewClosure())
+    $save = {
+        if ($pick.Rect -and $pick.Rect[2] -ge 40 -and $pick.Rect[3] -ge 30) {
+            $r = $pick.Rect
+            $pick.Result = New-Object System.Drawing.Rectangle ([int][Math]::Round($b.X + $r[0] * $s)), ([int][Math]::Round($b.Y + $r[1] * $s)), ([int][Math]::Round($r[2] * $s)), ([int][Math]::Round($r[3] * $s))
+            $w.Close()
+        }
+    }.GetNewClosure()
+    $w.FindName('PickSave').add_Click($save)
+    $w.FindName('PickCancel').add_Click({ $w.Close() }.GetNewClosure())
+    $board.add_MouseRightButtonUp({ $w.Close() }.GetNewClosure())
+    $w.add_KeyDown({
+        param($o, $e)
+        if ($e.Key -eq 'Escape') { $w.Close() }
+        if ($e.Key -eq 'Enter') { & $save }
+    }.GetNewClosure())
+    $w.add_ContentRendered({ $w.Activate() | Out-Null; $w.Focus() | Out-Null }.GetNewClosure())
+    [void]$w.ShowDialog()
+    $pick.Result
+}
+
+function Set-PopupArea {
+    $picked = Show-AreaPicker (Get-PopupRect)
+    if (-not $picked) { return }
+    $Settings.PopupRect = '{0},{1},{2},{3}' -f $picked.X, $picked.Y, $picked.Width, $picked.Height
+    Save-Settings
+    Reset-PopupTracks; $script:PopLastGrid = $null
+    Write-Log "popup area set to $($Settings.PopupRect)"
+    $tray.ShowBalloonTip(2500, 'Wardogs XP Tracker', 'Popup area saved.', 'None')
 }
 
 # ---------------------------------------------------------------- tray icon
@@ -789,7 +1177,11 @@ $tray.Icon = New-TrayIcon
 $tray.Text = "Wardogs XP Tracker v$AppVersion$(if ($Demo) { ' (demo)' })"
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 $miShow    = $menu.Items.Add('Hide');                $miShow.ShortcutKeyDisplayString  = 'Ctrl+Shift+O'
-$miNext    = $menu.Items.Add('Next match');          $miNext.ShortcutKeyDisplayString  = 'Ctrl+Shift+N'
+$miNext    = $menu.Items.Add('End match');           $miNext.ShortcutKeyDisplayString  = 'Ctrl+Shift+N'
+$miDetails = $menu.Items.Add('Match details')
+$miLive    = $menu.Items.Add('Live popup tracking'); $miLive.ShortcutKeyDisplayString  = 'Ctrl+Shift+C'
+$miArea    = $menu.Items.Add('Set popup area...')
+$miAreaReset = $menu.Items.Add('Reset popup area')
 $miFind    = $menu.Items.Add('Find Wardog Level screen'); $miFind.ShortcutKeyDisplayString = 'Ctrl+Shift+U'
 $miClick   = $menu.Items.Add('Click-through');       $miClick.ShortcutKeyDisplayString = 'Ctrl+Shift+L'
 $miOpacity = New-Object System.Windows.Forms.ToolStripMenuItem 'Opacity'
@@ -811,21 +1203,16 @@ $miCycle.add_Click({ Move-ToNextCorner })
 # Only offer "Next monitor" when there is more than one.
 $miMove.add_DropDownOpening({ $miNextScreen.Visible = @([System.Windows.Forms.Screen]::AllScreens).Count -gt 1 })
 $menu.Items.Add($miMove) | Out-Null
-# Sample recorder (temporary, for building the popup reader).
-$miRecord  = New-Object System.Windows.Forms.ToolStripMenuItem 'Record samples'
-$miRecToggle = $miRecord.DropDownItems.Add('Start recording'); $miRecToggle.ShortcutKeyDisplayString = 'Ctrl+Shift+R'
-$miRecToggle.add_Click({ Switch-Recording })
-$miShot = $miRecord.DropDownItems.Add('Save full screenshot'); $miShot.ShortcutKeyDisplayString = 'Ctrl+Shift+S'
-$miShot.add_Click({ Save-ManualScreenshot })
-$miSamples = $miRecord.DropDownItems.Add('Open samples folder')
-$miSamples.add_Click({ New-Item -ItemType Directory -Force -Path (Get-SamplesDir) | Out-Null; Start-Process explorer.exe (Get-SamplesDir) })
-$menu.Items.Add($miRecord) | Out-Null
 $miFolder  = $menu.Items.Add('Open data folder')
 $menu.Items.Add('-') | Out-Null
 $miQuit    = $menu.Items.Add('Quit')
 
 $miShow.add_Click({ Set-Visible $script:Hidden })
-$miNext.add_Click({ Start-Next })
+$miNext.add_Click({ Invoke-EndMatch })
+$miDetails.add_Click({ Show-MatchDetails $null })
+$miLive.add_Click({ Switch-Continuous })
+$miArea.add_Click({ Set-PopupArea })
+$miAreaReset.add_Click({ $Settings.PopupRect = $null; Save-Settings; Reset-PopupTracks; $script:PopLastGrid = $null; $tray.ShowBalloonTip(2000, 'Wardogs XP Tracker', 'Popup area reset to the default spot.', 'None') })
 $miFind.add_Click({ Invoke-ManualFind })
 $miClick.add_Click({ Set-ClickThrough (-not $Settings.ClickThrough) })
 $miFolder.add_Click({ Start-Process explorer.exe $DataDir })
@@ -834,7 +1221,8 @@ $tray.add_MouseClick({ param($s, $e) if ($e.Button -eq 'Left') { Set-Visible $sc
 $tray.ContextMenuStrip = $menu
 
 # ---------------------------------------------------------------- wiring
-$ui.BtnNext.add_Click({ Start-Next })
+$ui.BtnNext.add_Click({ Invoke-EndMatch })
+$ui.BtnDetails.add_Click({ Show-MatchDetails $null })
 $ui.BtnHide.add_Click({ Set-Visible $false })
 # Drag from any empty spot to move it (buttons still click normally).
 $win.add_MouseLeftButtonDown({
@@ -866,21 +1254,20 @@ $win.add_ContentRendered({
 $MOD = 0x2 -bor 0x4   # Ctrl + Shift
 $hotkeys = New-Object WdHotkeys
 $failed = @()
-$keys = @{ 1 = 0x4E; 2 = 0x55; 3 = 0x4F; 4 = 0x4C; 5 = 0x21; 6 = 0x22; 7 = 0x4D; 8 = 0x52; 9 = 0x53 }   # N U O L PageUp PageDown M R S
-$keyNames = @{ 1 = 'N'; 2 = 'U'; 3 = 'O'; 4 = 'L'; 5 = 'PageUp'; 6 = 'PageDown'; 7 = 'M'; 8 = 'R'; 9 = 'S' }
-foreach ($id in 1..9) { if (-not $hotkeys.Add($id, $MOD, $keys[$id])) { $failed += "Ctrl+Shift+$($keyNames[$id])" } }
+$keys = @{ 1 = 0x4E; 2 = 0x55; 3 = 0x4F; 4 = 0x4C; 5 = 0x21; 6 = 0x22; 7 = 0x4D; 8 = 0x43 }   # N U O L PageUp PageDown M C
+$keyNames = @{ 1 = 'N'; 2 = 'U'; 3 = 'O'; 4 = 'L'; 5 = 'PageUp'; 6 = 'PageDown'; 7 = 'M'; 8 = 'C' }
+foreach ($id in 1..8) { if (-not $hotkeys.Add($id, $MOD, $keys[$id])) { $failed += "Ctrl+Shift+$($keyNames[$id])" } }
 $hotkeys.add_Pressed({
     param($id)
     switch ($id) {
-        1 { Start-Next }
+        1 { Invoke-EndMatch }
         2 { Invoke-ManualFind }
         3 { Set-Visible $script:Hidden }
         4 { Set-ClickThrough (-not $Settings.ClickThrough) }
         5 { Set-Opacity ($Settings.Opacity + 10) }
         6 { Set-Opacity ($Settings.Opacity - 10) }
         7 { if ($script:Hidden) { Set-Visible $true }; Move-ToNextCorner }
-        8 { Switch-Recording }
-        9 { Save-ManualScreenshot }
+        8 { Switch-Continuous }
     }
 })
 if ($failed) { $script:Status = "Hotkeys already used by another app: $($failed -join ', ')"; Write-Log $script:Status }
@@ -893,23 +1280,16 @@ $topTimer = New-Object System.Windows.Threading.DispatcherTimer
 $topTimer.Interval = [TimeSpan]::FromSeconds(2)
 $topTimer.add_Tick({ if (-not $script:Hidden) { [WdNative]::KeepOnTop($script:hwnd) } })
 
-$recTimer = New-Object System.Windows.Threading.DispatcherTimer
-$recTimer.Interval = [TimeSpan]::FromMilliseconds(1000 / $RecordFps)
-$recTimer.add_Tick({
-    if (-not $script:Rec) { return }
-    try {
-        $stopped = Invoke-RecordTick
-        if ($stopped) { $tray.ShowBalloonTip(5000, 'Wardogs XP Tracker', $stopped, 'Warning'); Update-RecordMenu }
-    } catch { Write-Log "record ERROR $_" }
-    Update-StatusLine   # keeps the REC timer and frame count current
-})
+$popupTimer = New-Object System.Windows.Threading.DispatcherTimer
+$popupTimer.Interval = [TimeSpan]::FromMilliseconds([Math]::Max(100, [int]$Settings.PopupPollMs))
+$popupTimer.add_Tick({ Invoke-PopupPoll })
 
 $app = New-Object System.Windows.Application
 $app.ShutdownMode = 'OnExplicitShutdown'
 $app.add_Exit({
-    Stop-Recording 'tracker closed'
-    $recTimer.Stop()
+    $popupTimer.Stop()
     $pollTimer.Stop(); $topTimer.Stop()
+    try { Save-Tracker } catch {}
     $hotkeys.Dispose()
     $tray.Visible = $false; $tray.Dispose()
 })
@@ -918,8 +1298,8 @@ $tray.Visible = $true
 $miClick.Checked = $Settings.ClickThrough
 Set-Opacity $Settings.Opacity
 Update-UI
-$pollTimer.Start(); $topTimer.Start(); $recTimer.Start()
-Update-RecordMenu
+$miLive.Checked = $Settings.Continuous
+$pollTimer.Start(); $topTimer.Start(); $popupTimer.Start()
 Write-Log "ready (demo=$Demo)"
 # Start off-screen; ContentRendered moves it into place once its size is known (avoids a flash on the main monitor).
 $win.Left = -32000; $win.Top = -32000

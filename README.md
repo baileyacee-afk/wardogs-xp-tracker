@@ -3,6 +3,9 @@
 A small always-on-top window that tracks the XP each **role (class)** earns per match toward
 its **2,500 XP end-of-match bonus cap**, with alerts at every 500 XP tier.
 Each role has its own cap, so once one is maxed you can switch roles and earn another bonus.
+
+It reads the XP and cash popups live as you play, keeps a per-match breakdown of every one
+(kills, assists, revives, building...), and works out the end-of-match bonus afterwards.
 No install needed: it uses PowerShell and Windows' built-in text recognition.
 
 ## Download
@@ -22,7 +25,7 @@ It opens in the top-right corner of your screen (your second monitor, if you hav
 anywhere, or press **Ctrl+Shift+M** to jump between corners; it remembers where you put it.
 Right-click the tray icon for options, including *Move window*.
 
-To preview it without the game, run:
+To preview it without the game (a made-up match, start to finish), run:
 
 ```
 powershell -ExecutionPolicy Bypass -File XpTracker.ps1 -Demo
@@ -32,56 +35,66 @@ powershell -ExecutionPolicy Bypass -File XpTracker.ps1 -Demo
 
 ## How it tracks your XP
 
-The game only shows XP on the **Wardog Level** screen, so the tracker reads that screen whenever
-it's open (screenshots + Windows OCR; it never touches the game's memory or files).
+Everything is read from the screen (screenshots + Windows OCR); it never touches the game's
+memory or files.
 
-1. **First time:** open the Wardog Level screen. The tracker finds it on its own within a few
-   seconds (or press **Ctrl+Shift+U**) and remembers where it is.
-2. **Each match:** press **Ctrl+Shift+N** (or *Next Match*) at the start, then open the Wardog
-   Level screen once so it saves your starting XP.
-3. **During the match:** open the Wardog Level screen whenever you like. The tracker reads it every
-   2 seconds while it's open and updates your match XP.
+- **Live popups.** About 3 times a second the tracker looks at the XP and cash popups under the
+  cash boxes at the top right. It only runs text recognition when they change, counts each popup
+  once, and credits XP to the class shown by the popup's symbol. The status line says
+  **LIVE: reading popups** while this is working. **Ctrl+Shift+C** turns it on/off.
+- **The Wardog Level screen.** Open it whenever you like: its exact totals replace the popup
+  estimates, so any popup that was missed or misread is corrected there. The first time, the
+  tracker finds it on its own within a few seconds (or press **Ctrl+Shift+U**).
 
-The header shows your **Wardog level** (all six role levels added up) and how many levels you've
-gained this match. Below it, **Match Bonus** shows how many of the six roles have maxed their
-bonus this match, each role's symbol with a mini bar toward 2,500, and a line about the role
-you're playing (whichever last gained XP). Every role also has its own row with its symbol, XP
-this match, its tier, and a bar toward 2,500.
-At each 500 XP tier you get a sound and a notification naming the role, and the window's border
-flashes. At 2,500 that role turns green and shows **MAX**.
+### Each match
 
-Pressing Next Match files the finished match under **Recent Matches**, with each role's result.
+1. Just play. Popups are counted from the moment they appear.
+2. When the match is over, the tracker notices the results screen (or press **Ctrl+Shift+N** /
+   **END MATCH**).
+3. Open the **Wardog Level** screen once. That read files the match under **Recent Matches**, with
+   the **end-of-match bonus (deduced)** for each class: the XP that arrived after the match ended.
+   The bonus is a fixed XP per tier, so the tracker also tells your placement (700 per tier = 2nd).
 
-## Recording samples
+Press END MATCH a second time to file a match straight away without the bonus.
 
-Live tracking of the in-match XP and cash popups is in the works. To build it, the tracker needs
-real examples of those popups. This recorder is temporary and will be removed once that's done.
+### What you see
 
-1. Press **Ctrl+Shift+R** (or tray > **Record samples** > *Start recording*) and play normally.
-   The status line shows **REC**, the time and the frame count.
-2. Open the **Wardog Level** screen now and then, especially after switching class. Those reads
-   tell which class each popup symbol belongs to, so you don't need to record one class at a time.
-3. Press **Ctrl+Shift+R** again to stop. Record as many sessions as you like; aim to cover all
-   six classes overall.
-4. On the end-of-match screen, press **Ctrl+Shift+S** to save a full screenshot.
+- **Wardog level** (all six role levels added up) and levels gained this match.
+- **Match Bonus:** how many of the six classes have maxed their bonus, a symbol and mini bar per
+  class, a line about the class you're playing, and **cash this match** (from the popups; the
+  game's own counter resets every life).
+- **Roles:** each class's XP this match, tier, and bar toward 2,500.
+- **DETAILS** (or click any match under Recent Matches): total XP and cash, the deduced bonus,
+  XP and cash grouped by reason with counts, and every popup in order with its time.
 
-Recordings are saved in tray > Record samples > *Open samples folder*, one folder per session.
-Recording uses a little CPU (well under 2% on a typical PC) and about 30 KB per frame; a session
-stops itself at 5,000 frames or when the disk has less than 2 GB free.
+At each 500 XP tier you get a sound and a notification naming the class, and the window's border
+flashes. At 2,500 that class turns green and shows **MAX**.
+
+### How sure the numbers are
+
+A popup that was missed would show up as extra bonus, so each match carries **confidence notes**
+when something could have gone wrong: popup reads that couldn't be understood, time with live
+tracking off, XP that couldn't be matched to a class, cash amounts where the `$` was misread, or a
+bonus that isn't a clean multiple of the per-tier payout.
+
+## Setting the popup area
+
+The popup area defaults to just under the cash boxes at the top right. If your screen layout is
+different, right-click the tray icon > **Set popup area...**, drag a box around where the popups
+stack up (tall enough for 6-8 rows), and press **Save** or Enter. *Reset popup area* puts it back.
 
 ## Hotkeys
 
 | Keys                | Action                                          |
 |---------------------|-------------------------------------------------|
-| Ctrl+Shift+N        | Next match (saves the current one to history)   |
+| Ctrl+Shift+N        | End match (press again to file it right away)   |
+| Ctrl+Shift+C        | Live popup tracking on / off                    |
 | Ctrl+Shift+U        | Find the Wardog Level screen now                |
 | Ctrl+Shift+O        | Show / hide                                     |
 | Ctrl+Shift+L        | Click-through (mouse passes through to the game)|
 | Ctrl+Shift+PageUp   | More opaque                                     |
 | Ctrl+Shift+PageDown | More transparent                                |
 | Ctrl+Shift+M        | Move to the next corner of the screen           |
-| Ctrl+Shift+R        | Start / stop recording samples                  |
-| Ctrl+Shift+S        | Save a full screenshot of the game              |
 
 ## Troubleshooting
 
@@ -92,21 +105,29 @@ stops itself at 5,000 frames or when the disk has less than 2 GB free.
 - **I can't see the window:** press **Ctrl+Shift+O** (show/hide) or **Ctrl+Shift+M** (move to a
   corner), or use the tray icon's *Move window* menu. If the game is in exclusive fullscreen,
   switch it to Borderless.
-- **It runs but the numbers never change:** read the status line at the bottom of the window; it
-  says what's wrong (game not detected, black screen capture, OCR language missing, panel not
-  found). Open the Wardog Level screen and press **Ctrl+Shift+U**. If it still can't find it, send
-  `last-scan.png` and `tracker.log` from the data folder (tray menu > *Open data folder*).
+- **Popups aren't being counted:** check the status line says *LIVE: reading popups*. If it says
+  the window covers the popup area, move it (Ctrl+Shift+M). Otherwise set the popup area (tray >
+  *Set popup area...*). Popups it couldn't read are saved as pictures in the `unparsed` folder.
+- **It runs but the Wardog Level numbers never change:** read the status line at the bottom of
+  the window; it says what's wrong (game not detected, black screen capture, OCR language missing,
+  panel not found). Open the Wardog Level screen and press **Ctrl+Shift+U**. If it still can't find
+  it, send `last-scan.png` and `tracker.log` from the data folder (tray menu > *Open data folder*).
 - **An error box appears:** the message and `tracker.log` in the data folder say what went wrong.
 
 ## Notes
 
-- A role's match XP = its XP now minus its XP when the match started.
-- Misreads are filtered per role: a big drop in a role's XP during a match is always ignored, and
-  smaller odd changes count only after 3 identical reads in a row.
-- The bonus rules (per role, 500 XP per tier, 5 tiers) come from player testing. They're set at the
-  top of `TrackerCore.ps1` if the game changes them.
+- Popups show a reason ("KILL 250XP", "CONTROL ZONE PRESENCE +$160"); one row can show cash and
+  then XP for the same action, and each is counted. XP rows end with the class symbol; reasons that
+  always belong to one class (kills, revives, building, spotting...) are credited by reason.
+- The tracker learns what each class symbol looks like on your screen from those reasons
+  (`symbols.json` in the data folder), so telling classes apart improves as you play.
+- The bonus rules (per class, 500 XP per tier, 5 tiers) come from player testing. They're set at
+  the top of `TrackerCore.ps1` if the game changes them.
+- Live tracking costs very little: a tiny screenshot about 3 times a second, and text recognition
+  (about 0.15 s) only when the popups change.
 - Data lives in `%LOCALAPPDATA%\WardogsXpTracker` (tray menu > *Open data folder*):
-  `match.json` (current match), `history.json` (past matches), `settings.json`, `tracker.log`.
+  `match.json` (current match), `history.json` (past matches), `matches\` (every popup of each
+  past match), `symbols.json`, `unparsed\`, `settings.json`, `tracker.log`.
 
 ## License
 

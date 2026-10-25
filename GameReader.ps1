@@ -26,11 +26,20 @@ function Wait-WinRt($Operation, [Type]$ResultType) {
 
 # The game's program is normally WardogsClient-Win64-Shipping, but other stores or builds may name it
 # differently, so also accept any program starting with "Wardogs" or a window titled just "Wardogs".
+# Listing every process is slow and this is asked several times a second, so the answer is kept for 5 s.
+$script:GameProc = $null
+$script:GameProcAt = [datetime]::MinValue
 function Get-GameProcess {
-    Get-Process -ErrorAction SilentlyContinue | Where-Object {
+    if (((Get-Date) - $script:GameProcAt).TotalSeconds -lt 5) {
+        if (-not $script:GameProc) { return $null }
+        try { if (-not $script:GameProc.HasExited) { return $script:GameProc } } catch {}
+    }
+    $script:GameProc = Get-Process -ErrorAction SilentlyContinue | Where-Object {
         $_.Id -ne $PID -and $_.MainWindowHandle -ne [IntPtr]::Zero -and
         ($_.ProcessName -like 'Wardogs*' -or $_.MainWindowTitle.Trim() -eq 'Wardogs')
     } | Sort-Object { $_.ProcessName -ne 'WardogsClient-Win64-Shipping' } | Select-Object -First 1
+    $script:GameProcAt = Get-Date
+    $script:GameProc
 }
 
 # Screen rectangle of the game window (borderless/windowed), or the main screen if the game isn't running.
@@ -80,9 +89,9 @@ function Get-OcrEngine {
 }
 
 # Returns every recognized word with its position in the original image's pixels.
-function Read-OcrWords([System.Drawing.Bitmap]$Bitmap) {
+function Read-OcrWords([System.Drawing.Bitmap]$Bitmap, [double]$Scale = 2.0) {
     # Upscaling makes the small XP text much more reliable.
-    $scale = [Math]::Min(2.0, [Windows.Media.Ocr.OcrEngine]::MaxImageDimension / [double][Math]::Max($Bitmap.Width, $Bitmap.Height))
+    $scale = [Math]::Min($Scale, [Windows.Media.Ocr.OcrEngine]::MaxImageDimension / [double][Math]::Max($Bitmap.Width, $Bitmap.Height))
     $big = New-Object System.Drawing.Bitmap ([int]($Bitmap.Width * $scale)), ([int]($Bitmap.Height * $scale))
     $g = [System.Drawing.Graphics]::FromImage($big)
     $g.InterpolationMode = 'HighQualityBicubic'
