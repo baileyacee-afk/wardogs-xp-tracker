@@ -42,8 +42,10 @@ it's open (screenshots + Windows OCR; it never touches the game's memory or file
 3. **During the match:** open the Wardog Level screen whenever you like. The tracker reads it every
    2 seconds while it's open and updates your match XP.
 
-The top of the window features the role you're playing (whichever last gained XP); every role
-also has its own row with XP this match, its tier, and a bar toward 2,500.
+The header shows your **Wardog level** (all six role levels added up) and how many levels you've
+gained this match. Below it, the role you're playing (whichever last gained XP) is featured with
+its class symbol; every role also has its own row with its symbol, XP this match, its tier, and a
+bar toward 2,500.
 At each 500 XP tier you get a sound and a notification naming the role, and the window's border
 flashes. At 2,500 that role turns green and shows **MAX**.
 

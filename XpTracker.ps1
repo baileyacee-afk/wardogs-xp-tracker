@@ -21,7 +21,7 @@
 param([switch]$Demo)
 
 # Matches the GitHub release tag (v1.0, v1.1, ...) and CHANGELOG.md.
-$AppVersion = '1.2'
+$AppVersion = '1.3'
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -121,6 +121,30 @@ $Gold = '#D8B45A'; $Green = '#5BD06E'; $Ink = '#EADFC4'; $Muted = '#9A8F78'; $Di
 
 $tickBorders = (1..$TierCount | ForEach-Object { if ($_ -lt $TierCount) { '<Border BorderBrush="#0B0907" BorderThickness="0,0,2,0"/>' } else { '<Border/>' } }) -join ''
 
+# Class symbols, drawn on a 24x24 grid in the spirit of the game's own (our drawings, not game art):
+# Assault arrowhead, Medic cross, Support wrench, Recon crosshair, Driver steering wheel, Pilot wings.
+# "C" is replaced with the color; Update-UI recolors them afterwards.
+$RoleIcons = @{
+    infantry = '<Path Data="M12,2 L22,21 L12,16.5 L2,21 Z" Fill="C"/>'
+    medic    = '<Path Data="M9,2 H15 V9 H22 V15 H15 V22 H9 V15 H2 V9 H9 Z" Fill="C"/>'
+    support  = '<Ellipse Canvas.Left="12" Canvas.Top="2" Width="10" Height="10" Stroke="C" StrokeThickness="3"/>' +
+               '<Line X1="13.8" Y1="10.2" X2="4.5" Y2="19.5" Stroke="C" StrokeThickness="3.6" StrokeEndLineCap="Round"/>'
+    recon    = '<Ellipse Canvas.Left="4" Canvas.Top="4" Width="16" Height="16" Stroke="C" StrokeThickness="2.2"/>' +
+               '<Line X1="12" Y1="1" X2="12" Y2="8" Stroke="C" StrokeThickness="2.2"/><Line X1="12" Y1="16" X2="12" Y2="23" Stroke="C" StrokeThickness="2.2"/>' +
+               '<Line X1="1" Y1="12" X2="8" Y2="12" Stroke="C" StrokeThickness="2.2"/><Line X1="16" Y1="12" X2="23" Y2="12" Stroke="C" StrokeThickness="2.2"/>' +
+               '<Ellipse Canvas.Left="10.5" Canvas.Top="10.5" Width="3" Height="3" Fill="C"/>'
+    driver   = '<Ellipse Canvas.Left="2.5" Canvas.Top="2.5" Width="19" Height="19" Stroke="C" StrokeThickness="2.6"/>' +
+               '<Ellipse Canvas.Left="9" Canvas.Top="9" Width="6" Height="6" Fill="C"/>' +
+               '<Line X1="4" Y1="12" X2="9.5" Y2="12" Stroke="C" StrokeThickness="2.4"/><Line X1="14.5" Y1="12" X2="20" Y2="12" Stroke="C" StrokeThickness="2.4"/>' +
+               '<Line X1="12" Y1="14.5" X2="12" Y2="20" Stroke="C" StrokeThickness="2.4"/>'
+    pilot    = '<Path Data="M12,10 C9,6.5 5,5 1,5 C2.5,8.5 6,10.5 9.5,11.3 C7,11.8 5.2,13 4.5,14.5 C7.5,14.7 10.2,13.8 12,12.6 C13.8,13.8 16.5,14.7 19.5,14.5 C18.8,13 17,11.8 14.5,11.3 C18,10.5 21.5,8.5 23,5 C19,5 15,6.5 12,10 Z" Fill="C"/>'
+}
+function Get-RoleIconXaml([string]$Role, [double]$Size, [string]$Name = '', [string]$Margin = '0') {
+    $n = if ($Name) { ' x:Name="{0}"' -f $Name } else { '' }
+    $shapes = $RoleIcons[$Role].Replace('"C"', ('"{0}"' -f $Ink))
+    '<Viewbox{0} Width="{1}" Height="{1}" Margin="{2}" VerticalAlignment="Center"><Canvas Width="24" Height="24">{3}</Canvas></Viewbox>' -f $n, $Size, $Margin, $shapes
+}
+
 # One row per role: name, level, XP this match, bonus tier, and a bar toward the 2,500 cap.
 $roleRows = foreach ($r in $RoleOrder) {
 @"
@@ -128,8 +152,11 @@ $roleRows = foreach ($r in $RoleOrder) {
           <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
           <StackPanel>
-            <TextBlock x:Name="${r}_Name" Text="$($RoleNames[$r])" FontSize="14" FontWeight="SemiBold"/>
-            <TextBlock x:Name="${r}_To" Text=" " FontSize="11" Foreground="$Dim"/>
+            <StackPanel Orientation="Horizontal">
+              $(Get-RoleIconXaml $r 14 "${r}_Icon" '0,0,7,0')
+              <TextBlock x:Name="${r}_Name" Text="$($RoleNames[$r])" FontSize="14" FontWeight="SemiBold"/>
+            </StackPanel>
+            <TextBlock x:Name="${r}_To" Text=" " FontSize="11" Foreground="$Dim" Margin="21,0,0,0"/>
           </StackPanel>
           <StackPanel Grid.Column="1">
             <TextBlock x:Name="${r}_Gain" Text="+0" FontSize="15" FontWeight="SemiBold" Foreground="$Dim" HorizontalAlignment="Right"/>
@@ -197,8 +224,11 @@ $tierLabels = foreach ($t in 1..$TierCount) {
       <!-- header: drag to move -->
       <Grid x:Name="Header" Background="#01000000" Margin="14,10,10,0" Cursor="SizeAll">
         <StackPanel>
-          <TextBlock Text="//WARDOGS" FontSize="11" FontWeight="SemiBold" Foreground="$Gold"/>
-          <TextBlock Text="MATCH BONUS" FontSize="16" FontWeight="SemiBold"/>
+          <TextBlock Text="//WARDOG LEVEL" FontSize="11" FontWeight="SemiBold" Foreground="$Gold"/>
+          <StackPanel Orientation="Horizontal">
+            <TextBlock x:Name="TxtWardogLv" Text="-" FontSize="40" FontWeight="Bold" LineHeight="42" LineStackingStrategy="BlockLineHeight"/>
+            <TextBlock x:Name="TxtLvGain" Text=" " FontSize="12.5" FontWeight="SemiBold" Foreground="$Green" VerticalAlignment="Bottom" Margin="9,0,0,6"/>
+          </StackPanel>
         </StackPanel>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top">
           <Button x:Name="BtnNext" Style="{StaticResource Flat}" Content="NEXT MATCH" ToolTip="File this match and start a new one (Ctrl+Shift+N)"/>
@@ -207,7 +237,12 @@ $tierLabels = foreach ($t in 1..$TierCount) {
       </Grid>
 
       <!-- featured role: the one you're playing -->
-      <TextBlock x:Name="TxtRole" Text="NO XP YET" FontSize="13" FontWeight="SemiBold" Foreground="$Gold" Margin="14,12,14,0"/>
+      <Border Height="1" Background="#2E271A" Margin="14,10,14,8"/>
+      <TextBlock Text="MATCH BONUS" FontSize="11" FontWeight="SemiBold" Foreground="$Gold" Margin="14,0,14,4"/>
+      <StackPanel Orientation="Horizontal" Margin="14,0,14,0">
+        <Border x:Name="FeatIcon" Width="18" Height="18" Margin="0,0,7,0" VerticalAlignment="Center"/>
+        <TextBlock x:Name="TxtRole" Text="NO XP YET" FontSize="15" FontWeight="SemiBold" Foreground="$Gold" VerticalAlignment="Center"/>
+      </StackPanel>
       <Grid Margin="14,0,14,0">
         <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom">
           <TextBlock x:Name="TxtXp" Text="0" FontSize="44" FontWeight="Bold" LineHeight="44" LineStackingStrategy="BlockLineHeight"/>
@@ -284,6 +319,22 @@ function Set-Bar($ColFill, $ColRest, [long]$Xp) {
     $ColRest.Width = New-Object System.Windows.GridLength (1 - $ratio), 'Star'
 }
 
+# A class symbol as a standalone element (for the featured role, which changes).
+function New-RoleIcon([string]$Role, [double]$Size) {
+    $x = (Get-RoleIconXaml $Role $Size) -replace '^<Viewbox', '<Viewbox xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"'
+    [Windows.Markup.XamlReader]::Parse($x)
+}
+
+# Recolors every shape inside a class symbol.
+function Set-IconColor($Icon, $Brush) {
+    if (-not $Icon) { return }
+    foreach ($shape in $Icon.Child.Children) {
+        if ($shape.Fill) { $shape.Fill = $Brush }
+        if ($shape.Stroke) { $shape.Stroke = $Brush }
+    }
+}
+
+$script:FeatRole = '(none yet)'
 function Update-UI {
     $gains  = Get-RoleGains
     $active = Get-ActiveRole
@@ -293,6 +344,17 @@ function Update-UI {
     $tier = Get-Tier $xp
     $max  = $xp -ge $MatchCap
     $ui.TxtRole.Text = if ($active) { $RoleNames[$active].ToUpper() } else { 'NO XP YET THIS MATCH' }
+    if ($active -ne $script:FeatRole) {
+        $script:FeatRole = $active
+        $ui.FeatIcon.Child = if ($active) { New-RoleIcon $active 18 } else { $null }
+    }
+    if ($ui.FeatIcon.Child) { Set-IconColor $ui.FeatIcon.Child $(if ($max) { $Brush.Green } else { $Brush.Gold }) }
+
+    # Wardog level: all six role levels added up, plus levels gained this match.
+    $wl = Get-WardogLevel
+    $ui.TxtWardogLv.Text = if ($null -ne $wl) { "$wl" } else { '-' }
+    $gained = Get-LevelsGained
+    $ui.TxtLvGain.Text = if ($gained -gt 0) { "+$gained this match" } else { ' ' }
     $ui.TxtXp.Text = '{0:N0}' -f $xp
     $ui.TxtXp.Foreground = if ($max) { $Brush.Green } else { $Brush.Ink }
     Set-Bar $ui.ColFill $ui.ColRest $xp
@@ -319,6 +381,7 @@ function Update-UI {
             else                                     { "  $dot  $('{0:N0}' -f ($next - $last)) to Lv $($lv + 1)" }
         $ui["${r}_To"].Text = if ($null -ne $lv) { "Lv $lv$toNext" } else { ' ' }
         $ui["${r}_Name"].Foreground = if ($r -eq $active) { $Brush.Gold } else { $Brush.Ink }
+        Set-IconColor $ui["${r}_Icon"] $(if ($rmax) { $Brush.Green } elseif ($r -eq $active) { $Brush.Gold } else { $Brush.Muted })
         $ui["${r}_Gain"].Text = '+{0:N0}' -f $g
         $ui["${r}_Gain"].Foreground = if ($rmax) { $Brush.Green } elseif ($g -gt 0) { $Brush.Ink } else { $Brush.Dim }
         $ui["${r}_Tier"].Text = if ($rmax) { 'MAX' } else { "Tier $t / $TierCount" }
@@ -701,7 +764,7 @@ $script:DemoXp = [ordered]@{ infantry = 130627; medic = 269872; support = 118408
 $script:DemoLv = [ordered]@{ infantry = 21; medic = 28; support = 20; recon = 13; driver = 14; pilot = 12 }
 $script:DemoNext = [ordered]@{ infantry = 145400; medic = 288450; support = 127200; recon = 43750; driver = 54750; pilot = 37500 }
 $script:DemoGains = @(@{}, @{ medic = 325 }, @{ medic = 410 }, @{ medic = 380 }, @{ medic = 520 },
-    @{ medic = 450 }, @{ medic = 540 }, @{ infantry = 300 }, @{ infantry = 420 }, @{ infantry = 260 })
+    @{ medic = 450 }, @{ medic = 540 }, @{ infantry = 300; pilot = 450 }, @{ infantry = 420 }, @{ infantry = 260 })
 function Invoke-DemoStep {
     $i = $script:Tick - 1
     # After the scripted gains: file the match into history, then take one read to start the next.

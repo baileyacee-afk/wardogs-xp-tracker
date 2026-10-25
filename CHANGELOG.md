@@ -3,6 +3,14 @@
 Versions match the [GitHub releases](https://github.com/baileyacee-afk/wardogs-xp-tracker/releases).
 The version you're running shows when you hover over the tray icon.
 
+## v1.3
+
+- Your **Wardog level** (all six role levels added up) is shown large at the top, with the
+  levels gained this match next to it.
+- Each class has its symbol next to its name (Assault arrowhead, Medic cross, Support wrench,
+  Recon crosshair, Driver steering wheel, Pilot wings), also on the featured role. Symbols are
+  gold for the role you're playing and green once a role's bonus is maxed.
+
 ## v1.2
 
 - Sample recorder is now a plain start/stop (Ctrl+Shift+R); there's no class to pick. Which class

@@ -32,6 +32,7 @@ function New-MatchState {
         Base     = $null          # XP per role when the match started (set by the first read)
         Last     = [ordered]@{}   # latest accepted XP per role
         Levels   = [ordered]@{}
+        BaseLevels = [ordered]@{} # level per role when the match started
         Next     = [ordered]@{}   # XP needed for the next level, per role
         Tiers    = [ordered]@{}   # highest bonus tier already announced, per role
         Active   = $null          # the role that most recently gained XP (the one you're playing)
@@ -79,6 +80,22 @@ function Get-RoleGains {
 
 function Get-Tier([long]$Xp) { [int][Math]::Min($TierCount, [Math]::Floor($Xp / $TierSize)) }
 
+# Wardog level = the six role levels added up (what the game shows on the Wardog Level screen).
+# $null until every role's level has been read.
+function Get-WardogLevel {
+    $known = @($RoleOrder | Where-Object { $null -ne $script:State.Levels[$_] })
+    if ($known.Count -lt $RoleOrder.Count) { return $null }
+    [int]($known | ForEach-Object { [int]$script:State.Levels[$_] } | Measure-Object -Sum).Sum
+}
+
+# Levels gained this match, across all roles.
+function Get-LevelsGained {
+    [int](@($RoleOrder | ForEach-Object {
+        $now = $script:State.Levels[$_]; $start = $script:State.BaseLevels[$_]
+        if ($null -ne $now -and $null -ne $start) { [Math]::Max(0, [int]$now - [int]$start) } else { 0 }
+    }) | Measure-Object -Sum).Sum
+}
+
 # The role to feature: the one that last gained XP, else the one with the most this match.
 function Get-ActiveRole {
     if ($script:State.Active) { return $script:State.Active }
@@ -124,7 +141,7 @@ function Add-Read($Progress) {
     # Starting XP is saved per role, the first time each role is read this match.
     if (-not $script:State.Base) { $script:State.Base = [ordered]@{} }
     $fresh = @($xp.Keys | Where-Object { $null -eq $script:State.Base[$_] })
-    foreach ($r in $fresh) { $script:State.Base[$r] = $xp[$r] }
+    foreach ($r in $fresh) { $script:State.Base[$r] = $xp[$r]; $script:State.BaseLevels[$r] = $Progress[$r].Level }
 
     # Whichever role gained the most since the last read is the one being played.
     $bestDelta = 0
