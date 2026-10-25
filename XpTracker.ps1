@@ -21,7 +21,7 @@
 param([switch]$Demo)
 
 # Matches the GitHub release tag (v1.0, v1.1, ...) and CHANGELOG.md.
-$AppVersion = '2.2'
+$AppVersion = '2.3'
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -597,6 +597,7 @@ function Read-Area([System.Drawing.Rectangle]$Rect) {
 }
 
 function Use-Read($Progress) {
+    if ($State.EndRequested) { Save-EndSnapshot }   # this read may file the match
     $res = Add-Read $Progress
     if ($res.Note -and $res.Note -ne $script:LastNote) { Write-Log "read: $($res.Note)" }
     $script:LastNote = $res.Note
@@ -904,12 +905,40 @@ function Invoke-EndMatch {
         Write-Log 'match ended'
         $tray.ShowBalloonTip(5000, 'Match ended', 'Open the Wardog Level screen to read your final XP. The tracker works out the end-of-match bonus from it.', 'None')
     } else {
+        Save-EndSnapshot
         Show-Filed (Complete-Match -NoFinalRead)
     }
     $ui.Frame.BorderThickness = New-Object System.Windows.Thickness 1
     $ui.Frame.BorderBrush = New-Brush '#4A3F28'
     $script:Status = ''
     Update-UI
+}
+
+# A picture of the tracker window as it looks now (2x size, for a sharp image).
+function Save-WindowSnapshot([string]$Path) {
+    try {
+        $el = $win.Content
+        if (-not $el -or $el.ActualWidth -lt 10) { return $false }
+        $wd = $el.ActualWidth; $ht = $el.ActualHeight
+        $dv = New-Object System.Windows.Media.DrawingVisual
+        $dc = $dv.RenderOpen()
+        $dc.DrawRectangle((New-Brush '#14100A'), $null, (New-Object System.Windows.Rect 0, 0, $wd, $ht))
+        $dc.DrawRectangle((New-Object System.Windows.Media.VisualBrush $el), $null, (New-Object System.Windows.Rect 0, 0, $wd, $ht))
+        $dc.Close()
+        $rtb = New-Object System.Windows.Media.Imaging.RenderTargetBitmap ([int]($wd * 2)), ([int]($ht * 2)), 192, 192, ([System.Windows.Media.PixelFormats]::Pbgra32)
+        $rtb.Render($dv)
+        $enc = New-Object System.Windows.Media.Imaging.PngBitmapEncoder
+        $enc.Frames.Add([System.Windows.Media.Imaging.BitmapFrame]::Create($rtb))
+        $fs = [IO.File]::Create($Path)
+        try { $enc.Save($fs) } finally { $fs.Dispose() }
+        $true
+    } catch { Write-Log "snapshot ERROR $_"; $false }
+}
+
+# The window at the end of the match, saved next to the match's popups (matches\<start>.png).
+function Save-EndSnapshot {
+    $stamp = ([datetime]::Parse($State.Start)).ToString('yyyyMMdd-HHmmss')
+    [void](Save-WindowSnapshot (Join-Path $DataDir "matches\$stamp.png"))
 }
 
 function Show-Filed($Entry) {
@@ -962,7 +991,129 @@ function Invoke-DemoStep {
 }
 
 # ---------------------------------------------------------------- match details window
-# One match's breakdown: totals, the deduced bonus, totals by reason, and every popup in order.
+# (events can be dictionaries, which Measure-Object can't read by name, so sum them directly)
+function Get-AmountSum($List) { $t = [long]0; foreach ($e in @($List)) { $t += [long]$e.Amount }; $t }
+
+# One match's breakdown as a list of lines (head / row / note, with colors), shared by the details
+# window and the saved page: totals, the deduced bonus, totals by reason, and every popup in order.
+function Get-MatchLines($Entry, $Events, [bool]$Live) {
+    $red = '#E0705A'
+    $out = New-Object System.Collections.Generic.List[object]
+    function Add-Head([string]$Text) { $out.Add([pscustomobject]@{ Kind = 'head'; Left = $Text; LeftColor = $Gold }) }
+    function Add-Note([string]$Text, [string]$Color, [double]$Top) { $out.Add([pscustomobject]@{ Kind = 'note'; Left = $Text; LeftColor = $Color; Top = $Top }) }
+    function Add-Line([string]$Left, [string]$Right, [string]$LeftColor = $Ink, [string]$RightColor = $Ink, [string]$Weight = 'Normal') {
+        $out.Add([pscustomobject]@{ Kind = 'row'; Left = $Left; Right = $Right; LeftColor = $LeftColor; RightColor = $RightColor; Weight = $Weight })
+    }
+    $cashColor = { param([long]$v) if ($v -ge 0) { $Green } else { $red } }
+
+    Add-Head 'SUMMARY'
+    Add-Line 'Total XP' ('+{0:N0}' -f [long]$Entry.Xp) $Muted $Ink 'SemiBold'
+    foreach ($r in $RoleOrder) {
+        if ($Entry.Roles -and $null -ne $Entry.Roles[$r]) { $g = [long]$Entry.Roles[$r]; $t = Get-Tier $g; Add-Line "   $($RoleNames[$r])" ('+{0:N0}  {1}' -f $g, $(if ($t -ge $TierCount) { 'MAX' } else { "T$t" })) $Muted $(if ($t -ge $TierCount) { $Green } else { $Ink }) }
+    }
+    if ($null -ne $Entry.BonusTotal) {
+        Add-Line ('End-of-match bonus (deduced)' + $(if ($Entry.Placement) { ", $($Entry.Placement)" })) ('+{0:N0}' -f [long]$Entry.BonusTotal) $Gold $Gold 'SemiBold'
+        foreach ($r in $RoleOrder) { if ($Entry.Bonus -and $null -ne $Entry.Bonus[$r] -and [long]$Entry.Bonus[$r] -ne 0) { Add-Line "   $($RoleNames[$r])" ('+{0:N0}' -f [long]$Entry.Bonus[$r]) $Muted $Gold } }
+    } elseif (-not $Live) { Add-Line 'End-of-match bonus (deduced)' 'not available' $Muted $Dim }
+    if ($null -ne $Entry.NetCash) { Add-Line 'Cash this match (incl. gear bought)' (Format-Cash ([long]$Entry.NetCash)) $Muted (& $cashColor ([long]$Entry.NetCash)) 'SemiBold' }
+    Add-Line 'Cash from popups' (Format-Cash ([long]$Entry.Cash)) $Muted (& $cashColor ([long]$Entry.Cash)) $(if ($null -eq $Entry.NetCash) { 'SemiBold' } else { 'Normal' })
+    if ($null -ne $Entry.ResultsCash) { Add-Line 'Cash on the results screen' (Format-Cash ([long]$Entry.ResultsCash)) $Muted $Ink }
+
+    if (@($Entry.Warnings).Count) {
+        Add-Head 'CONFIDENCE'
+        foreach ($wn in $Entry.Warnings) { Add-Note "!  $wn" '#E0B05A' 2 }
+    }
+
+    $xpEv = @($Events | Where-Object { $_.Kind -eq 'xp' }); $cashEv = @($Events | Where-Object { $_.Kind -eq 'cash' })
+    foreach ($grp in @(@('XP BY REASON', $xpEv, 'xp'), @('CASH BY REASON', $cashEv, 'cash'))) {
+        if (-not @($grp[1]).Count) { continue }
+        Add-Head $grp[0]
+        foreach ($g in (@($grp[1]) | Group-Object { $_.Reason } | Sort-Object { -[Math]::Abs((Get-AmountSum $_.Group)) })) {
+            $sum = Get-AmountSum $g.Group
+            $label = if ($g.Name) { (Get-Culture).TextInfo.ToTitleCase($g.Name.ToLower()) } else { 'Unlabeled' }
+            $amount = if ($grp[2] -eq 'xp') { '+{0:N0} XP' -f $sum } else { Format-Cash $sum }
+            Add-Line "$label  x$($g.Count)" $amount
+        }
+    }
+
+    if (@($Events).Count) {
+        Add-Head "EVERY POPUP ($(@($Events).Count))"
+        foreach ($e in $Events) {
+            $t = ([datetime]::Parse($e.T)).ToString('h:mm:ss')
+            $label = (Get-Culture).TextInfo.ToTitleCase(([string]$e.Reason).ToLower())
+            if ($e.Kind -eq 'xp') {
+                $who = if ($e.Role) { $RoleNames[$e.Role] } else { '?' }
+                Add-Line "$t   $label" ('+{0:N0} XP  {1}' -f [long]$e.Amount, $who) $Muted $Ink
+            } else {
+                Add-Line "$t   $label" ((Format-Cash ([long]$e.Amount)) + $(if ($e.Uncertain) { ' ?' } else { '' })) $Muted (& $cashColor ([long]$e.Amount))
+            }
+        }
+    } else { Add-Note 'No popups were recorded for this match.' $Dim 14 }
+    , $out
+}
+
+# SAVE in match details: writes the page, with the picture of the tracker at the end of the match,
+# as one HTML file in Documents\Wardogs XP Tracker. Returns the file's path.
+function Export-MatchReport($Entry, $Lines, [bool]$Live) {
+    $dir = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Wardogs XP Tracker'
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $start = [datetime]::Parse($Entry.Start)
+    $file = Join-Path $dir ('Wardogs match {0}.html' -f $start.ToString('yyyy-MM-dd h.mm tt'))
+    $enc = { param($s) [System.Net.WebUtility]::HtmlEncode([string]$s) }
+
+    # The picture: saved at the end of the match, or (for the match in progress) the window right now.
+    $img = ''
+    $pic = if ($Entry.Snapshot) { Join-Path $DataDir $Entry.Snapshot } else { $null }
+    if ($Live) { $pic = Join-Path $env:TEMP 'wardogs-live-snapshot.png'; if (-not (Save-WindowSnapshot $pic)) { $pic = $null } }
+    if ($pic -and (Test-Path $pic)) {
+        $img = '<figure><img alt="The tracker at the end of the match" src="data:image/png;base64,' + [Convert]::ToBase64String([IO.File]::ReadAllBytes($pic)) + '"><figcaption>' + $(if ($Live) { 'The tracker when this was saved' } else { 'The tracker at the end of the match' }) + '</figcaption></figure>'
+    }
+    $when = $start.ToString('dddd, MMM d, yyyy h:mm tt') + $(if ($Entry.End) { ' - ' + ([datetime]::Parse($Entry.End)).ToString('h:mm tt') } else { ' (in progress)' })
+
+    $rows = foreach ($ln in $Lines) {
+        switch ($ln.Kind) {
+            'head' { '<h2>' + (& $enc $ln.Left) + '</h2>' }
+            'note' { '<p class="note" style="color:' + $ln.LeftColor + '">' + (& $enc $ln.Left) + '</p>' }
+            default {
+                $wt = if ($ln.Weight -eq 'SemiBold') { ' class="b"' } else { '' }
+                '<div class="row"' + $wt + '><span style="color:' + $ln.LeftColor + '">' + (& $enc $ln.Left) + '</span><span style="color:' + $ln.RightColor + '">' + (& $enc $ln.Right) + '</span></div>'
+            }
+        }
+    }
+    $html = @"
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wardogs match $(& $enc $start.ToString('MMM d h:mm tt'))</title>
+<style>
+body { margin: 0; background: #0B0907; color: $Ink; font: 14px/1.45 Bahnschrift, 'Segoe UI', sans-serif; }
+main { max-width: 820px; margin: 0 auto; padding: 28px 16px 48px; display: flex; gap: 32px; align-items: flex-start; flex-wrap: wrap; }
+header { width: 100%; }
+.eyebrow { color: $Gold; font-size: 12px; font-weight: 600; letter-spacing: .06em; }
+h1 { margin: 2px 0 0; font-size: 22px; font-weight: 600; }
+figure { margin: 0; flex: 0 0 auto; }
+figure img { display: block; width: 330px; max-width: 100%; border-radius: 6px; border: 1px solid #4A3F28; }
+figcaption { color: $Dim; font-size: 12px; margin-top: 6px; }
+.list { flex: 1 1 360px; min-width: 0; }
+h2 { color: $Gold; font-size: 12px; font-weight: 600; letter-spacing: .04em; margin: 18px 0 4px; }
+.row { display: flex; justify-content: space-between; gap: 16px; padding: 2px 0; border-bottom: 1px solid #1E1912; }
+.row span:first-child { white-space: pre-wrap; }
+.row span:last-child { white-space: nowrap; text-align: right; }
+.b { font-weight: 600; }
+.note { margin: 4px 0; font-size: 13px; }
+footer { width: 100%; color: $Dim; font-size: 12px; }
+</style></head><body><main>
+<header><div class="eyebrow">//MATCH DETAILS</div><h1>$(& $enc $when)</h1></header>
+$img
+<div class="list">
+$($rows -join "`n")
+</div>
+<footer>Saved by Wardogs XP Tracker v$AppVersion.</footer>
+</main></body></html>
+"@
+    [IO.File]::WriteAllText($file, $html, (New-Object System.Text.UTF8Encoding $true))
+    $file
+}
+
 # $Entry is a filed match from history, or $null for the match in progress.
 function Show-MatchDetails($Entry) {
     $live = -not $Entry
@@ -992,7 +1143,11 @@ function Show-MatchDetails($Entry) {
           <TextBlock Text="//MATCH DETAILS" FontSize="11" FontWeight="SemiBold" Foreground="$Gold"/>
           <TextBlock x:Name="DWhen" FontSize="16" FontWeight="SemiBold"/>
         </StackPanel>
-        <Button x:Name="DClose" Content="CLOSE" HorizontalAlignment="Right" VerticalAlignment="Top" Foreground="$Muted" Background="Transparent" BorderBrush="#4A3F28" Padding="8,3" FontSize="11" Cursor="Hand"/>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top">
+          <Button x:Name="DPic" Content="PICTURE" ToolTip="The tracker as it looked at the end of this match" Foreground="$Muted" Background="Transparent" BorderBrush="#4A3F28" Padding="8,3" FontSize="11" Cursor="Hand" Margin="0,0,6,0"/>
+          <Button x:Name="DSave" Content="SAVE" ToolTip="Save this page (with the picture) to Documents\Wardogs XP Tracker and open it" Foreground="$Gold" Background="Transparent" BorderBrush="#4A3F28" Padding="8,3" FontSize="11" Cursor="Hand" Margin="0,0,6,0"/>
+          <Button x:Name="DClose" Content="CLOSE" Foreground="$Muted" Background="Transparent" BorderBrush="#4A3F28" Padding="8,3" FontSize="11" Cursor="Hand"/>
+        </StackPanel>
       </Grid>
       <ScrollViewer x:Name="DScroll" VerticalScrollBarVisibility="Auto" Margin="16,0,8,14">
         <StackPanel x:Name="DBody" Margin="0,0,8,0"/>
@@ -1008,77 +1163,42 @@ function Show-MatchDetails($Entry) {
     $w.FindName('DHead').add_MouseLeftButtonDown({ try { $w.DragMove() } catch {} }.GetNewClosure())
     $w.FindName('DScroll').MaxHeight = [Math]::Max(300, [System.Windows.SystemParameters]::WorkArea.Height * 0.8)
 
-    function Add-Text([string]$Text, [double]$Size = 13, $Color = $Brush.Ink, [string]$Weight = 'Normal', [double]$Top = 0) {
-        $t = New-Object System.Windows.Controls.TextBlock
-        $t.Text = $Text; $t.FontSize = $Size; $t.Foreground = $Color; $t.TextWrapping = 'Wrap'
-        $t.FontWeight = [System.Windows.FontWeights]::$Weight
-        $t.Margin = New-Object System.Windows.Thickness 0, $Top, 0, 0
-        [void]$body.Children.Add($t)
-    }
-    function Add-Row([string]$Left, [string]$Right, $LeftColor = $Brush.Ink, $RightColor = $Brush.Ink, [string]$Weight = 'Normal') {
-        $g = New-Object System.Windows.Controls.Grid
-        $g.Margin = New-Object System.Windows.Thickness 0, 2, 0, 0
-        $l = New-Object System.Windows.Controls.TextBlock; $l.Text = $Left; $l.Foreground = $LeftColor; $l.FontSize = 13; $l.TextTrimming = 'CharacterEllipsis'; $l.Margin = New-Object System.Windows.Thickness 0, 0, 90, 0
-        $r = New-Object System.Windows.Controls.TextBlock; $r.Text = $Right; $r.Foreground = $RightColor; $r.FontSize = 13; $r.HorizontalAlignment = 'Right'
-        $l.FontWeight = $r.FontWeight = [System.Windows.FontWeights]::$Weight
-        [void]$g.Children.Add($l); [void]$g.Children.Add($r)
-        [void]$body.Children.Add($g)
-    }
-    function Add-Heading([string]$Text) { Add-Text $Text 11 $Brush.Gold 'SemiBold' 14 }
-
-    # Summary
-    Add-Heading 'SUMMARY'
-    Add-Row 'Total XP' ('+{0:N0}' -f [long]$Entry.Xp) $Brush.Muted $Brush.Ink 'SemiBold'
-    foreach ($r in $RoleOrder) {
-        if ($Entry.Roles -and $null -ne $Entry.Roles[$r]) { $g = [long]$Entry.Roles[$r]; $t = Get-Tier $g; Add-Row "   $($RoleNames[$r])" ('+{0:N0}  {1}' -f $g, $(if ($t -ge $TierCount) { 'MAX' } else { "T$t" })) $Brush.Muted $(if ($t -ge $TierCount) { $Brush.Green } else { $Brush.Ink }) }
-    }
-    if ($null -ne $Entry.BonusTotal) {
-        Add-Row ('End-of-match bonus (deduced)' + $(if ($Entry.Placement) { ", $($Entry.Placement)" })) ('+{0:N0}' -f [long]$Entry.BonusTotal) $Brush.Gold $Brush.Gold 'SemiBold'
-        foreach ($r in $RoleOrder) { if ($Entry.Bonus -and $null -ne $Entry.Bonus[$r] -and [long]$Entry.Bonus[$r] -ne 0) { Add-Row "   $($RoleNames[$r])" ('+{0:N0}' -f [long]$Entry.Bonus[$r]) $Brush.Muted $Brush.Gold } }
-    } elseif (-not $live) { Add-Row 'End-of-match bonus (deduced)' 'not available' $Brush.Muted $Brush.Dim }
-    if ($null -ne $Entry.NetCash) {
-        $net = [long]$Entry.NetCash
-        Add-Row 'Cash this match (incl. gear bought)' (Format-Cash $net) $Brush.Muted $(if ($net -ge 0) { $Brush.Green } else { New-Brush '#E0705A' }) 'SemiBold'
-    }
-    $cash = [long]$Entry.Cash
-    Add-Row 'Cash from popups' (Format-Cash $cash) $Brush.Muted $(if ($cash -ge 0) { $Brush.Green } else { New-Brush '#E0705A' }) $(if ($null -eq $Entry.NetCash) { 'SemiBold' } else { 'Normal' })
-    if ($null -ne $Entry.ResultsCash) { Add-Row 'Cash on the results screen' (Format-Cash ([long]$Entry.ResultsCash)) $Brush.Muted $Brush.Ink }
-
-    # Confidence
-    if (@($Entry.Warnings).Count) {
-        Add-Heading 'CONFIDENCE'
-        foreach ($wn in $Entry.Warnings) { Add-Text "!  $wn" 12.5 (New-Brush '#E0B05A') 'Normal' 2 }
-    }
-
-    # By reason
-    $xpEv = @($events | Where-Object { $_.Kind -eq 'xp' }); $cashEv = @($events | Where-Object { $_.Kind -eq 'cash' })
-    # (events can be dictionaries, which Measure-Object can't read by name, so sum them directly)
-    function Get-AmountSum($List) { $t = [long]0; foreach ($e in @($List)) { $t += [long]$e.Amount }; $t }
-    foreach ($grp in @(@('XP BY REASON', $xpEv, 'xp'), @('CASH BY REASON', $cashEv, 'cash'))) {
-        if (-not @($grp[1]).Count) { continue }
-        Add-Heading $grp[0]
-        foreach ($g in (@($grp[1]) | Group-Object { $_.Reason } | Sort-Object { -[Math]::Abs((Get-AmountSum $_.Group)) })) {
-            $sum = Get-AmountSum $g.Group
-            $label = if ($g.Name) { (Get-Culture).TextInfo.ToTitleCase($g.Name.ToLower()) } else { 'Unlabeled' }
-            $amount = if ($grp[2] -eq 'xp') { '+{0:N0} XP' -f $sum } else { Format-Cash $sum }
-            Add-Row "$label  x$($g.Count)" $amount $Brush.Ink $Brush.Ink
+    $lines = Get-MatchLines $Entry $events $live
+    foreach ($ln in $lines) {
+        if ($ln.Kind -eq 'row') {
+            $g = New-Object System.Windows.Controls.Grid
+            $g.Margin = New-Object System.Windows.Thickness 0, 2, 0, 0
+            $l = New-Object System.Windows.Controls.TextBlock; $l.Text = $ln.Left; $l.Foreground = New-Brush $ln.LeftColor; $l.FontSize = 13; $l.TextTrimming = 'CharacterEllipsis'; $l.Margin = New-Object System.Windows.Thickness 0, 0, 90, 0
+            $r = New-Object System.Windows.Controls.TextBlock; $r.Text = $ln.Right; $r.Foreground = New-Brush $ln.RightColor; $r.FontSize = 13; $r.HorizontalAlignment = 'Right'
+            $l.FontWeight = $r.FontWeight = [System.Windows.FontWeights]::($ln.Weight)
+            [void]$g.Children.Add($l); [void]$g.Children.Add($r)
+            [void]$body.Children.Add($g)
+        } else {
+            $t = New-Object System.Windows.Controls.TextBlock
+            $t.Text = $ln.Left; $t.Foreground = New-Brush $ln.LeftColor; $t.TextWrapping = 'Wrap'
+            if ($ln.Kind -eq 'head') { $t.FontSize = 11; $t.FontWeight = [System.Windows.FontWeights]::SemiBold; $top = 14 } else { $t.FontSize = 12.5; $top = $ln.Top }
+            $t.Margin = New-Object System.Windows.Thickness 0, $top, 0, 0
+            [void]$body.Children.Add($t)
         }
     }
 
-    # Every popup in order
-    if ($events.Count) {
-        Add-Heading "EVERY POPUP ($($events.Count))"
-        foreach ($e in $events) {
-            $t = ([datetime]::Parse($e.T)).ToString('h:mm:ss')
-            $label = (Get-Culture).TextInfo.ToTitleCase(([string]$e.Reason).ToLower())
-            if ($e.Kind -eq 'xp') {
-                $who = if ($e.Role) { $RoleNames[$e.Role] } else { '?' }
-                Add-Row "$t   $label" ('+{0:N0} XP  {1}' -f [long]$e.Amount, $who) $Brush.Muted $Brush.Ink
-            } else {
-                Add-Row "$t   $label" ((Format-Cash ([long]$e.Amount)) + $(if ($e.Uncertain) { ' ?' } else { '' })) $Brush.Muted $(if ([long]$e.Amount -ge 0) { $Brush.Green } else { New-Brush '#E0705A' })
-            }
-        }
-    } else { Add-Text 'No popups were recorded for this match.' 12.5 $Brush.Dim 'Normal' 14 }
+    # PICTURE: the window at the end of the match (filed matches from v2.3 on).
+    $pic = if ($Entry.Snapshot) { Join-Path $DataDir $Entry.Snapshot } else { $null }
+    # (Handlers get this match's data through the window's Tag: a closure couldn't see this script's functions.)
+    $w.Tag = @{ Entry = $Entry; Lines = $lines; Live = $live; Pic = $pic }
+    $picBtn = $w.FindName('DPic')
+    if ($pic -and (Test-Path $pic)) {
+        $picBtn.add_Click({ param($s) Start-Process ([System.Windows.Window]::GetWindow($s).Tag.Pic) })
+    } else { $picBtn.Visibility = 'Collapsed' }
+    $w.FindName('DSave').add_Click({
+        param($s)
+        $d = [System.Windows.Window]::GetWindow($s).Tag
+        try {
+            $file = Export-MatchReport $d.Entry $d.Lines $d.Live
+            Write-Log "match saved to $file"
+            Start-Process $file
+        } catch { Write-Log "save ERROR $_"; Set-Status "Couldn't save the match: $($_.Exception.Message)" }
+    })
 
     # Open next to the tracker, on the same screen.
     $w.WindowStartupLocation = 'Manual'

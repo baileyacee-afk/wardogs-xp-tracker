@@ -3,6 +3,13 @@
 Versions match the [GitHub releases](https://github.com/baileyacee-afk/wardogs-xp-tracker/releases).
 The version you're running shows when you hover over the tray icon.
 
+## v2.3
+
+- **Save a match:** SAVE in match details writes the whole page (summary, bonus, cash, XP and cash
+  by reason, every popup) as one HTML file in `Documents\Wardogs XP Tracker` and opens it.
+- **Picture of the tracker at the end of each match:** taken when the match is filed. PICTURE in
+  match details opens it, and it's included in the saved page.
+
 ## v2.2
 
 - **Cash this match now includes gear you buy.** Buying gear has no popup, so it was missing. The

@@ -346,6 +346,7 @@ function Complete-Match([switch]$NoFinalRead) {
         Payout = $payout; Placement = $placement; Cash = [long]$s.Cash; ResultsCash = $s.ResultsCash
         NetCash = $(if ($null -ne $s.BankStart -and $null -ne $s.BankNow) { Get-MatchCash $s } else { $null })
         EventCount = @($s.Events).Count; Unparsed = [int]$s.Unparsed; Warnings = $warnings; EventsFile = $eventsFile
+        Snapshot = $(if (Test-Path (Join-Path $script:DataDir "matches\$stamp.png")) { "matches\$stamp.png" } else { $null })
     }
     if ($total -gt 0 -or @($s.Events).Count) { $script:History = @(@($entry) + @($script:History) | Select-Object -First 100) }
 
