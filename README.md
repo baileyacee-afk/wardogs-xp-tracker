@@ -49,6 +49,21 @@ flashes. At 2,500 that role turns green and shows **MAX**.
 
 Pressing Next Match files the finished match under **Recent Matches**, with each role's result.
 
+## Recording samples
+
+Live tracking of the in-match XP and cash popups is in the works. To build it, the tracker needs
+real examples of those popups, one class at a time:
+
+1. Right-click the tray icon > **Record samples** > **Record as** *the class you're about to play*.
+2. Play normally. The status line shows **REC**, the time and the frame count.
+3. Press **Ctrl+Shift+R** to stop. Next time, Ctrl+Shift+R starts recording again with the same
+   class; pick a different one in the tray menu when you switch.
+4. On the end-of-match screen, press **Ctrl+Shift+S** to save a full screenshot.
+
+Recordings are saved in tray > Record samples > *Open samples folder*, one folder per session.
+Recording uses a little CPU (well under 2% on a typical PC) and about 30 KB per frame; a session
+stops itself at 5,000 frames or when the disk has less than 2 GB free.
+
 ## Hotkeys
 
 | Keys                | Action                                          |
@@ -60,6 +75,8 @@ Pressing Next Match files the finished match under **Recent Matches**, with each
 | Ctrl+Shift+PageUp   | More opaque                                     |
 | Ctrl+Shift+PageDown | More transparent                                |
 | Ctrl+Shift+M        | Move to the next corner of the screen           |
+| Ctrl+Shift+R        | Start / stop recording samples                  |
+| Ctrl+Shift+S        | Save a full screenshot of the game              |
 
 ## Troubleshooting
 

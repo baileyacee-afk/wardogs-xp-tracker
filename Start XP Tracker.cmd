@@ -1,6 +1,6 @@
 @echo off
 rem Opening this straight from inside the zip only extracts this one file, so check the rest are here.
-for %%F in (XpTracker.ps1 TrackerCore.ps1 GameReader.ps1) do (
+for %%F in (XpTracker.ps1 TrackerCore.ps1 GameReader.ps1 Recorder.ps1) do (
   if not exist "%~dp0%%F" (
     echo.
     echo  Wardogs XP Tracker can't start: %%F is missing from this folder.

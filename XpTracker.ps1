@@ -13,13 +13,15 @@
     Ctrl+Shift+PageUp     More opaque
     Ctrl+Shift+PageDown   More transparent
     Ctrl+Shift+M          Move to the next corner of the screen (or drag it anywhere)
+    Ctrl+Shift+R          Start / stop recording samples of the top-right corner (class picked in the tray)
+    Ctrl+Shift+S          Save a full screenshot of the game (e.g. the end-of-match screen)
 
   -Demo plays back made-up reads (no game needed) using a throwaway data folder.
 #>
 param([switch]$Demo)
 
 # Matches the GitHub release tag (v1.0, v1.1, ...) and CHANGELOG.md.
-$AppVersion = '1.0'
+$AppVersion = '1.1'
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -98,6 +100,8 @@ $Settings = [ordered]@{
     ClickThrough = $false
     PanelRect    = $null   # "x,y,w,h": where the in-game Wardog Level panel was last found
     PanelRoles   = 0       # how many roles were readable when it was found
+    RecordRect   = $null   # "x,y,w,h": area the sample recorder saves; default is the game's top-right
+    RecordLabel  = 'Unlabeled'   # class picked for the next recording
     WindowPos    = $null   # "x,y": where you last dragged the window
 }
 if (Test-Path $SettingsFile) {
@@ -110,6 +114,7 @@ function Save-Settings { $Settings | ConvertTo-Json | Set-Content -Path $Setting
 
 . (Join-Path $PSScriptRoot 'GameReader.ps1')
 . (Join-Path $PSScriptRoot 'TrackerCore.ps1')
+. (Join-Path $PSScriptRoot 'Recorder.ps1')
 Initialize-Tracker $DataDir
 
 # ---------------------------------------------------------------- window
@@ -361,9 +366,18 @@ function Update-UI {
         [void]$ui.HistoryList.Children.Add($row)
     }
 
+    Update-StatusLine
+}
+
+function Update-StatusLine {
     $started = "Match started $(([datetime]::Parse($State.Start)).ToString('h:mm tt'))"
     $read = if ($State.LastRead) { "last read $(([datetime]::Parse($State.LastRead)).ToString('h:mm:ss tt'))" } else { 'no reads yet' }
-    $ui.TxtStatus.Text = "$started  |  $read" + $(if ($script:Status) { "`n$script:Status" } else { '' })
+    $lines = @("$started  |  $read")
+    $rec = Get-RecordStatus
+    if ($rec) { $lines += "$rec  (Ctrl+Shift+R to stop)" }
+    if ($script:Status) { $lines += $script:Status }
+    $ui.TxtStatus.Text = $lines -join "`n"
+    $ui.TxtStatus.Foreground = if ($rec) { New-Brush '#E0705A' } else { $Brush.Dim }
 }
 
 # ---------------------------------------------------------------- placement, show/hide, opacity
@@ -499,6 +513,8 @@ function Read-Area([System.Drawing.Rectangle]$Rect) {
 }
 
 function Use-Read($Progress) {
+    # While recording samples, note every Wardog Level read so popups can be matched to roles later.
+    if ($script:Rec) { Write-RecLog ('read: ' + (($Progress.Keys | ForEach-Object { "$_=$($Progress[$_].Xp)(Lv$($Progress[$_].Level))" }) -join ' ')) }
     $res = Add-Read $Progress
     if ($res.Note -and $res.Note -ne $script:LastNote) { Write-Log "read: $($res.Note)" }
     $script:LastNote = $res.Note
@@ -642,6 +658,41 @@ function Invoke-Poll {
     } finally { $script:Busy = $false }
 }
 
+# ---------------------------------------------------------------- sample recorder controls
+function Update-RecordMenu {
+    $miRecToggle.Text = if ($script:Rec) { "Stop recording ($($script:Rec.Label))" } else { "Start recording ($($Settings.RecordLabel))" }
+    foreach ($mi in $miRecClasses) { $mi.Checked = ([string]$mi.Tag -eq $Settings.RecordLabel) }
+    Update-StatusLine
+}
+
+function Start-RecordingAs([string]$Label) {
+    $Settings.RecordLabel = $Label; Save-Settings
+    Start-Recording $Label
+    $tray.ShowBalloonTip(3000, "Recording samples: $Label", 'Saving the top-right corner while you play. Ctrl+Shift+R stops it.', 'None')
+    Update-RecordMenu
+}
+
+# Ctrl+Shift+R: stop if recording, otherwise start with the last class picked.
+function Switch-Recording {
+    if ($script:Rec) {
+        $n = $script:Rec.Frames; $label = $script:Rec.Label
+        Stop-Recording
+        $tray.ShowBalloonTip(3000, 'Recording stopped', "$label`: $n frames saved.", 'None')
+        Update-RecordMenu
+    } else { Start-RecordingAs $Settings.RecordLabel }
+}
+
+# Ctrl+Shift+S
+function Save-ManualScreenshot {
+    try {
+        $path = Save-FullScreenshot -Manual
+        $tray.ShowBalloonTip(2000, 'Screenshot saved', (Split-Path $path -Leaf), 'None')
+    } catch {
+        Write-Log "screenshot ERROR $_"
+        Set-Status "Couldn't save the screenshot: $($_.Exception.Message)"
+    }
+}
+
 function Start-Next {
     Start-NextMatch
     Write-Log 'next match'
@@ -714,6 +765,22 @@ $miCycle.add_Click({ Move-ToNextCorner })
 # Only offer "Next monitor" when there is more than one.
 $miMove.add_DropDownOpening({ $miNextScreen.Visible = @([System.Windows.Forms.Screen]::AllScreens).Count -gt 1 })
 $menu.Items.Add($miMove) | Out-Null
+# Sample recorder: pick the class you're about to play, then record; one session per class.
+$miRecord  = New-Object System.Windows.Forms.ToolStripMenuItem 'Record samples'
+$miRecToggle = $miRecord.DropDownItems.Add('Start recording'); $miRecToggle.ShortcutKeyDisplayString = 'Ctrl+Shift+R'
+$miRecToggle.add_Click({ Switch-Recording })
+$miRecord.DropDownItems.Add('-') | Out-Null
+$miRecClasses = foreach ($label in @($RoleOrder | ForEach-Object { $RoleNames[$_] }) + 'Unlabeled') {
+    $mi = $miRecord.DropDownItems.Add("Record as $label"); $mi.Tag = $label
+    $mi.add_Click({ param($s) Start-RecordingAs ([string]$s.Tag) })
+    $mi
+}
+$miRecord.DropDownItems.Add('-') | Out-Null
+$miShot = $miRecord.DropDownItems.Add('Save full screenshot'); $miShot.ShortcutKeyDisplayString = 'Ctrl+Shift+S'
+$miShot.add_Click({ Save-ManualScreenshot })
+$miSamples = $miRecord.DropDownItems.Add('Open samples folder')
+$miSamples.add_Click({ New-Item -ItemType Directory -Force -Path (Get-SamplesDir) | Out-Null; Start-Process explorer.exe (Get-SamplesDir) })
+$menu.Items.Add($miRecord) | Out-Null
 $miFolder  = $menu.Items.Add('Open data folder')
 $menu.Items.Add('-') | Out-Null
 $miQuit    = $menu.Items.Add('Quit')
@@ -760,9 +827,9 @@ $win.add_ContentRendered({
 $MOD = 0x2 -bor 0x4   # Ctrl + Shift
 $hotkeys = New-Object WdHotkeys
 $failed = @()
-$keys = @{ 1 = 0x4E; 2 = 0x55; 3 = 0x4F; 4 = 0x4C; 5 = 0x21; 6 = 0x22; 7 = 0x4D }   # N U O L PageUp PageDown M
-$keyNames = @{ 1 = 'N'; 2 = 'U'; 3 = 'O'; 4 = 'L'; 5 = 'PageUp'; 6 = 'PageDown'; 7 = 'M' }
-foreach ($id in 1..7) { if (-not $hotkeys.Add($id, $MOD, $keys[$id])) { $failed += "Ctrl+Shift+$($keyNames[$id])" } }
+$keys = @{ 1 = 0x4E; 2 = 0x55; 3 = 0x4F; 4 = 0x4C; 5 = 0x21; 6 = 0x22; 7 = 0x4D; 8 = 0x52; 9 = 0x53 }   # N U O L PageUp PageDown M R S
+$keyNames = @{ 1 = 'N'; 2 = 'U'; 3 = 'O'; 4 = 'L'; 5 = 'PageUp'; 6 = 'PageDown'; 7 = 'M'; 8 = 'R'; 9 = 'S' }
+foreach ($id in 1..9) { if (-not $hotkeys.Add($id, $MOD, $keys[$id])) { $failed += "Ctrl+Shift+$($keyNames[$id])" } }
 $hotkeys.add_Pressed({
     param($id)
     switch ($id) {
@@ -773,6 +840,8 @@ $hotkeys.add_Pressed({
         5 { Set-Opacity ($Settings.Opacity + 10) }
         6 { Set-Opacity ($Settings.Opacity - 10) }
         7 { if ($script:Hidden) { Set-Visible $true }; Move-ToNextCorner }
+        8 { Switch-Recording }
+        9 { Save-ManualScreenshot }
     }
 })
 if ($failed) { $script:Status = "Hotkeys already used by another app: $($failed -join ', ')"; Write-Log $script:Status }
@@ -785,9 +854,22 @@ $topTimer = New-Object System.Windows.Threading.DispatcherTimer
 $topTimer.Interval = [TimeSpan]::FromSeconds(2)
 $topTimer.add_Tick({ if (-not $script:Hidden) { [WdNative]::KeepOnTop($script:hwnd) } })
 
+$recTimer = New-Object System.Windows.Threading.DispatcherTimer
+$recTimer.Interval = [TimeSpan]::FromMilliseconds(1000 / $RecordFps)
+$recTimer.add_Tick({
+    if (-not $script:Rec) { return }
+    try {
+        $stopped = Invoke-RecordTick
+        if ($stopped) { $tray.ShowBalloonTip(5000, 'Wardogs XP Tracker', $stopped, 'Warning'); Update-RecordMenu }
+    } catch { Write-Log "record ERROR $_" }
+    Update-StatusLine   # keeps the REC timer and frame count current
+})
+
 $app = New-Object System.Windows.Application
 $app.ShutdownMode = 'OnExplicitShutdown'
 $app.add_Exit({
+    Stop-Recording 'tracker closed'
+    $recTimer.Stop()
     $pollTimer.Stop(); $topTimer.Stop()
     $hotkeys.Dispose()
     $tray.Visible = $false; $tray.Dispose()
@@ -797,7 +879,8 @@ $tray.Visible = $true
 $miClick.Checked = $Settings.ClickThrough
 Set-Opacity $Settings.Opacity
 Update-UI
-$pollTimer.Start(); $topTimer.Start()
+$pollTimer.Start(); $topTimer.Start(); $recTimer.Start()
+Update-RecordMenu
 Write-Log "ready (demo=$Demo)"
 # Start off-screen; ContentRendered moves it into place once its size is known (avoids a flash on the main monitor).
 $win.Left = -32000; $win.Top = -32000

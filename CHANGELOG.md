@@ -3,6 +3,19 @@
 Versions match the [GitHub releases](https://github.com/baileyacee-afk/wardogs-xp-tracker/releases).
 The version you're running shows when you hover over the tray icon.
 
+## v1.1
+
+Sample recorder, to collect real examples of the in-match XP and cash popups for the upcoming
+live popup tracking.
+
+- Tray > **Record samples**: pick the class you're about to play, then record. **Ctrl+Shift+R**
+  starts/stops (reusing the last class picked); each recording is its own session folder.
+- Saves the top-right corner of the game twice a second (skipping unchanged frames), a full
+  screenshot every 2 minutes, and every Wardog Level read made while recording.
+- **Ctrl+Shift+S** saves a full screenshot any time, for example of the end-of-match screen.
+- Stops itself at 5,000 frames (about 150 MB) or when the disk has less than 2 GB free.
+- The status line shows REC, the class, elapsed time and frame count while recording.
+
 ## v1.0
 
 First release.
