@@ -3,6 +3,18 @@
 Versions match the [GitHub releases](https://github.com/baileyacee-afk/wardogs-xp-tracker/releases).
 The version you're running shows when you hover over the tray icon.
 
+## v2.6
+
+The Wardog Level fix from v3.1, for the PowerShell version:
+
+- **The Wardog Level screen is read as soon as it opens**, even a quick hover over the level box.
+  Before, the tracker only looked every 6 seconds while it was closed, so it often missed it. Now
+  it checks every second with a cheap pixel count (the open panel's text always covers about the
+  same number of pixels, learned from the first read) and only runs text recognition when the
+  panel is there.
+- **Fewer misread XP totals:** the "/" after an XP total read as a 1 no longer makes that class's
+  XP get thrown out.
+
 ## v3.1 (preview)
 
 - **The Wardog Level screen is read as soon as it opens**, even a quick hover over the level box.

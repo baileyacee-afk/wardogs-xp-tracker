@@ -21,7 +21,7 @@
 param([switch]$Demo)
 
 # Matches the GitHub release tag (v1.0, v1.1, ...) and CHANGELOG.md.
-$AppVersion = '2.5'
+$AppVersion = '2.6'
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -101,6 +101,7 @@ $Settings = [ordered]@{
     ClickThrough = $false
     PanelRect    = $null   # "x,y,w,h": where the in-game Wardog Level panel was last found
     PanelRoles   = 0       # how many roles were readable when it was found
+    PanelWhite   = 0       # white text pixels in the open panel (learned), to spot it without OCR
     Continuous   = $true   # live popup tracking on
     PopupPollMs  = 300     # how often the popup area is checked (about 3 times a second)
     PopupRect    = $null   # "x,y,w,h": where XP/cash popups appear; default is under the top-right cash boxes
@@ -728,18 +729,48 @@ function Invoke-Poll {
             if ($script:Tick % $(if ($game) { 3 } else { 5 }) -eq 0) { Find-Panel }
             return
         }
-        # Known panel spot: check it every 2 s while the game is detected, every 6 s otherwise, and
-        # only run OCR when its white text changed (or every 10 s), so a closed panel costs nothing.
-        if (-not $game -and $script:Tick % 3 -ne 0) { return }
+    } catch {
+        Write-Log "poll ERROR $_"
+        $msg = "Problem reading the screen: $($_.Exception.Message)"
+        if ($script:Status -ne $msg) { Set-Status $msg }
+    } finally { $script:Busy = $false; Add-Perf 'slow' $sw }
+}
+
+# Whether the Wardog Level panel is worth an OCR read, from a cheap pixel count. The panel's white
+# text always covers about the same number of pixels (about 2,070 at 1080p; learned from the first
+# good read), while the game scene behind it almost never comes close, so even a quick hover over
+# the level box is caught without running OCR all the time.
+$PanelBurst = 800   # this much white text at once: probably the panel, even before learning
+function Test-PanelWorthReading([int]$White, [bool]$Changed, [double]$Since, [bool]$Open, [int]$Learned) {
+    $script:PanelInRange = $Learned -gt 0 -and $White -ge 0.6 * $Learned -and $White -le 1.5 * $Learned
+    if ($Since -lt 0.9) { return $false }
+    if ($script:PanelInRange) { return (-not $Open -or $Changed -or $Since -ge 2) }   # open: re-read every 2 s
+    if ($Learned -eq 0 -and $White -ge $PanelBurst) { return (-not $Open -or $Changed -or $Since -ge 2) }
+    # Anything else might still be the panel (a different size, or covered): an ordinary look now and then.
+    $White -ge 30 -and $Changed -and $Since -ge $(if ($Learned -gt 0) { 20 } else { 10 })
+}
+
+# Runs every second: reads the Wardog Level panel as soon as it opens (every 3 s if the game isn't detected).
+function Invoke-PanelPoll {
+    if ($script:Busy -or $Demo) { return }
+    $rect = Get-PanelRect
+    if (-not $rect) { return }
+    $script:PanelTick++
+    if (-not $script:GameNow -and $script:PanelTick % 3 -ne 0) { return }
+    $script:Busy = $true
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    try {
         $bmp = Get-Capture $rect
         try {
             $grid = [WdPopup]::WhiteGrid($bmp, 24, 16, $PopupGateWhite, $PopupGateSpread)
+            $white = [WdPopup]::Sum($grid)
             $changed = [WdPopup]::GridDiff($grid, $script:PanelLastGrid) -ge 0.03
             $since = ((Get-Date) - $script:PanelLastOcr).TotalSeconds
-            # While the panel is closed the game scene behind it keeps changing, so look again
-            # only every 6 s until it shows up.
-            $wait = if ($script:PanelOpen) { 0 } else { 6 }
-            if ([WdPopup]::Sum($grid) -lt 30 -or $since -lt $wait -or (-not $changed -and $since -lt 10)) { return }
+            if (-not (Test-PanelWorthReading $white $changed $since $script:PanelOpen ([int]$Settings.PanelWhite))) {
+                if ($white -lt 30 -or ([int]$Settings.PanelWhite -gt 0 -and -not $script:PanelInRange)) { $script:PanelOpen = $false }
+                return
+            }
+            $inRange = $script:PanelInRange
             $script:PanelLastGrid = $grid; $script:PanelLastOcr = Get-Date
             $osw = [Diagnostics.Stopwatch]::StartNew()
             $progress = Get-RoleProgress @(Read-OcrWords $bmp)
@@ -747,6 +778,16 @@ function Invoke-Poll {
         } finally { $bmp.Dispose() }
         $script:PanelOpen = $progress.Count -gt 0
         if ($progress.Count -eq 0) { return }   # panel not open right now
+        # Remember how much white text the open panel has, to spot it without OCR from now on.
+        if (@($progress.Values | Where-Object { $null -ne $_.Xp }).Count -ge $MinRoles) {
+            $had = [int]$Settings.PanelWhite
+            $learned = if ($inRange) { [int][Math]::Floor(($had * 3 + $white) / 4) } else { $white }
+            if ([Math]::Abs($learned - $had) -gt [Math]::Floor($had / 20)) {
+                $Settings.PanelWhite = $learned; Save-Settings
+                Write-Log "panel text learned: $learned white pixels"
+            }
+        }
+        $game = $script:GameNow
         $roles = ($progress.Keys | Sort-Object) -join ','
         if ($roles -ne $script:LastRoles) { Write-Log "reading roles: $roles"; $script:LastRoles = $roles }
         if ($progress.Count -ge $MinRoles) { Use-Read $progress }
@@ -761,10 +802,10 @@ function Invoke-Poll {
             if ($script:ShortReads % 10 -eq 0) { Find-Panel -Upgrade }
         }
     } catch {
-        Write-Log "poll ERROR $_"
+        Write-Log "panel ERROR $_"
         $msg = "Problem reading the screen: $($_.Exception.Message)"
         if ($script:Status -ne $msg) { Set-Status $msg }
-    } finally { $script:Busy = $false; Add-Perf 'panel-and-results' $sw }
+    } finally { $script:Busy = $false; Add-Perf 'panel-check' $sw }
 }
 
 # ---------------------------------------------------------------- live popups
@@ -788,6 +829,8 @@ $script:LiveState = 'waiting'   # on | off | blocked | waiting
 $script:PanelLastGrid = $null
 $script:PanelLastOcr = [datetime]::MinValue
 $script:PanelOpen = $false
+$script:PanelTick = 0
+$script:PanelInRange = $false
 $script:GameNow = $false
 $script:PopLastGrid = $null
 $script:PopLastOcr = [datetime]::MinValue
@@ -1493,10 +1536,14 @@ $popupTimer = New-Object System.Windows.Threading.DispatcherTimer
 $popupTimer.Interval = [TimeSpan]::FromMilliseconds([Math]::Max(100, [int]$Settings.PopupPollMs))
 $popupTimer.add_Tick({ Invoke-PopupPoll })
 
+$panelTimer = New-Object System.Windows.Threading.DispatcherTimer
+$panelTimer.Interval = [TimeSpan]::FromSeconds(1)
+$panelTimer.add_Tick({ Invoke-PanelPoll })
+
 $app = New-Object System.Windows.Application
 $app.ShutdownMode = 'OnExplicitShutdown'
 $app.add_Exit({
-    $popupTimer.Stop()
+    $popupTimer.Stop(); $panelTimer.Stop()
     $pollTimer.Stop(); $topTimer.Stop()
     try { Save-Tracker } catch {}
     $hotkeys.Dispose()
@@ -1508,7 +1555,7 @@ $miClick.Checked = $Settings.ClickThrough
 Set-Opacity $Settings.Opacity
 Update-UI
 $miLive.Checked = $Settings.Continuous
-$pollTimer.Start(); $topTimer.Start(); $popupTimer.Start()
+$pollTimer.Start(); $topTimer.Start(); $popupTimer.Start(); $panelTimer.Start()
 Write-Log "ready (demo=$Demo)"
 # Start off-screen; ContentRendered moves it into place once its size is known (avoids a flash on the main monitor).
 $win.Left = -32000; $win.Top = -32000

@@ -202,12 +202,16 @@ function Get-RoleProgress($Words) {
 
         $level = $null; $xp = $null; $next = $null; $used = @()
         foreach ($w in $mine) {
-            $n = ConvertTo-GameNumber $w.Text
+            # OCR sometimes reads the "/" after the XP as a 1 ("51,813/" -> "51.8131"): a full group of
+            # three digits followed by one more character is that slash.
+            $text = $w.Text
+            if ($text -match '^(\d{1,3}(?:[,.]\d{3})+)[1lI|]$') { $text = $matches[1] + '/' }
+            $n = ConvertTo-GameNumber $text
             if ($null -eq $n) { continue }
-            if ($w.Text -match '(?i)xp$')                     { if ($null -eq $next) { $next = $n; $used += $w } }
-            elseif ($null -eq $level -and $null -eq $xp -and $w.Text -notmatch '[,/]' -and $n -le 300) { $level = $n; $used += $w }
+            if ($text -match '(?i)xp$')                     { if ($null -eq $next) { $next = $n; $used += $w } }
+            elseif ($null -eq $level -and $null -eq $xp -and $text -notmatch '[,/]' -and $n -le 300) { $level = $n; $used += $w }
             # The XP ("51,982 /") counts even when the level above it couldn't be read.
-            elseif ($null -eq $xp -and ($null -ne $level -or $w.Text -match '[,/]'))   { $xp = $n; $used += $w }
+            elseif ($null -eq $xp -and ($null -ne $level -or $text -match '[,/]'))   { $xp = $n; $used += $w }
         }
         if ($null -eq $level -and $null -eq $xp) { continue }
         if ($null -ne $xp -and $null -ne $next -and $xp -gt $next) { $xp = $null }   # misread, don't trust it
