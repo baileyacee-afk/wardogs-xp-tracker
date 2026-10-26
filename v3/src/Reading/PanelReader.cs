@@ -18,6 +18,30 @@ namespace Wardogs.Reading
         public string Keys(string sep = ", ") => string.Join(sep, Order);
     }
 
+    // Decides, from a cheap pixel count, when the Wardog Level panel is worth an OCR read. The panel's
+    // white text always covers about the same number of pixels (about 2,070 at 1080p; learned from the
+    // first good read), while the game scene behind it almost never comes close, so even a quick hover
+    // over the level box is caught without running OCR all the time.
+    public static class PanelGate
+    {
+        public const int Burst = 800;   // this much white text at once: probably the panel, even before learning
+
+        // white: strict white-text pixels in the panel box; changed: its layout changed since the last read;
+        // since: seconds since the last read; open: the last read found the panel; learned: 0 until learned.
+        public static bool ShouldRead(int white, bool changed, double since, bool open, int learned, out bool inRange)
+        {
+            inRange = learned > 0 && white >= 0.6 * learned && white <= 1.5 * learned;
+            if (since < 0.9) return false;
+            if (inRange) return !open || changed || since >= 2;          // open: re-read every 2 s
+            if (learned == 0 && white >= Burst) return !open || changed || since >= 2;
+            // Anything else might still be the panel (a different size, or covered): an ordinary look now and then.
+            return white >= 30 && changed && since >= (learned > 0 ? 20 : 10);
+        }
+
+        // The learned count after a good read.
+        public static int Learn(int learned, int white, bool inRange) => inRange ? (learned * 3 + white) / 4 : white;
+    }
+
     public static class PanelReader
     {
         const RegexOptions I = RegexOptions.IgnoreCase;   // PowerShell's -match / -replace ignore case
@@ -92,12 +116,17 @@ namespace Wardogs.Reading
                 int? level = null; long? xp = null, next = null; var used = new List<OcrWord>();
                 foreach (var w in merged)
                 {
-                    var n = GameNumber(w.Text);
+                    // OCR sometimes reads the "/" after the XP as a 1 ("51,813/" -> "51.8131"): a full group of
+                    // three digits followed by one more character is that slash.
+                    var text = w.Text;
+                    var slash = Regex.Match(text, @"^(\d{1,3}(?:[,.]\d{3})+)[1lI|]$");
+                    if (slash.Success) text = slash.Groups[1].Value + "/";
+                    var n = GameNumber(text);
                     if (n == null) continue;
-                    if (Regex.IsMatch(w.Text, "xp$", I)) { if (next == null) { next = n; used.Add(w); } }
-                    else if (level == null && xp == null && !Regex.IsMatch(w.Text, "[,/]") && n <= 300) { level = n; used.Add(w); }
+                    if (Regex.IsMatch(text, "xp$", I)) { if (next == null) { next = n; used.Add(w); } }
+                    else if (level == null && xp == null && !Regex.IsMatch(text, "[,/]") && n <= 300) { level = n; used.Add(w); }
                     // The XP ("51,982 /") counts even when the level above it couldn't be read.
-                    else if (xp == null && (level != null || Regex.IsMatch(w.Text, "[,/]"))) { xp = n; used.Add(w); }
+                    else if (xp == null && (level != null || Regex.IsMatch(text, "[,/]"))) { xp = n; used.Add(w); }
                 }
                 if (level == null && xp == null) continue;
                 if (xp != null && next != null && xp > next) xp = null;   // misread, don't trust it

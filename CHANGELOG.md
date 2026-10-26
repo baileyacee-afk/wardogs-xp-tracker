@@ -3,6 +3,16 @@
 Versions match the [GitHub releases](https://github.com/baileyacee-afk/wardogs-xp-tracker/releases).
 The version you're running shows when you hover over the tray icon.
 
+## v3.1 (preview)
+
+- **The Wardog Level screen is read as soon as it opens**, even a quick hover over the level box.
+  Before, the tracker only looked every 6 seconds while it was closed, so it often missed it. Now
+  it checks every second with a cheap pixel count (the open panel's text always covers about the
+  same number of pixels, learned from the first read) and only runs text recognition when the
+  panel is there.
+- **Fewer misread XP totals:** the "/" after an XP total is sometimes read as a 1 ("51,813/" as
+  "51.8131"), which made that class's XP get thrown out. It's recognised now.
+
 ## v3.0 (preview)
 
 The tracker rebuilt as a Windows app in C#/.NET: one self-contained `WardogsXpTracker.exe`.

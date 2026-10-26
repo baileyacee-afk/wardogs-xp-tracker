@@ -72,14 +72,17 @@ namespace Wardogs.App
 
         void Run()
         {
-            var nextSlow = DateTime.Now; var nextPopup = DateTime.Now;
+            var nextSlow = DateTime.Now; var nextPanel = DateTime.Now.AddSeconds(1); var nextPopup = DateTime.Now;
             while (!cts.IsCancellationRequested)
             {
                 while (commands.TryDequeue(out var cmd)) Safe("command", cmd);
                 var now = DateTime.Now;
-                if (now >= nextSlow) { nextSlow = now.AddSeconds(2); var sw = Stopwatch.StartNew(); Safe("poll", SlowPoll); Perf.Add("panel-and-cash", sw); }
+                if (now >= nextSlow) { nextSlow = now.AddSeconds(2); var sw = Stopwatch.StartNew(); Safe("poll", SlowPoll); Perf.Add("slow", sw); }
+                if (now >= nextPanel) { nextPanel = now.AddSeconds(1); var sw = Stopwatch.StartNew(); Safe("poll", PanelPoll); Perf.Add("panel-check", sw); }
                 if (now >= nextPopup) { nextPopup = now.AddMilliseconds(Math.Max(100, settings.PopupPollMs)); Safe("popup", PopupPoll); }
-                var wait = (nextSlow < nextPopup ? nextSlow : nextPopup) - DateTime.Now;
+                var next = nextSlow < nextPopup ? nextSlow : nextPopup;
+                if (nextPanel < next) next = nextPanel;
+                var wait = next - DateTime.Now;
                 wake.WaitOne(Math.Max(1, (int)wait.TotalMilliseconds));
             }
         }
@@ -142,19 +145,35 @@ namespace Wardogs.App
                 if (tick % (game != null ? 3 : 5) == 0) FindPanel(false, false);
                 return;
             }
-            // Known panel spot: check it every 2 s while the game is detected, every 6 s otherwise, and
-            // only run OCR when its white text changed (or every 10 s), so a closed panel costs nothing.
-            if (game == null && tick % 3 != 0) return;
+        }
+
+        // Every second: is the Wardog Level panel open? The check is a pixel count, not OCR. The panel's
+        // white text always covers about the same number of pixels (about 2,070 at 1080p, learned from the
+        // first good read), while the game scene behind it almost never comes close. So OCR runs as soon
+        // as the panel opens (even a quick hover over the level box), and every 2 s while it stays open.
+        int panelTick;
+        bool inRange;
+
+        void PanelPoll()
+        {
+            if (demo || Paused) return;
+            var rect = GameScreen.ParseRect(settings.PanelRect);
+            if (rect.IsEmpty) return;
+            panelTick++;
+            if (!gameNow && panelTick % 3 != 0) return;   // game not detected: every 3 s
             PanelRead read;
+            int white;
             using (var bmp = CaptureAvoidingSelf(rect))
             {
                 var grid = PixelMath.WhiteGrid(bmp, 24, 16, PopupTuning.GateWhite, PopupTuning.GateSpread);
+                white = PixelMath.Sum(grid);
                 bool changed = PixelMath.GridDiff(grid, panelLastGrid) >= 0.03;
                 double since = (DateTime.Now - panelLastOcr).TotalSeconds;
-                // While the panel is closed the game scene behind it keeps changing, so look again
-                // only every 6 s until it shows up.
-                double wait = panelOpen ? 0 : 6;
-                if (PixelMath.Sum(grid) < 30 || since < wait || (!changed && since < 10)) return;
+                if (!PanelGate.ShouldRead(white, changed, since, panelOpen, settings.PanelWhite, out inRange))
+                {
+                    if (white < 30 || (settings.PanelWhite > 0 && !inRange)) panelOpen = false;
+                    return;
+                }
                 panelLastGrid = grid; panelLastOcr = DateTime.Now;
                 var sw = Stopwatch.StartNew();
                 read = PanelReader.Read(Ocr.Read(bmp));
@@ -162,6 +181,17 @@ namespace Wardogs.App
             }
             panelOpen = read.Count > 0;
             if (read.Count == 0) return;   // panel not open right now
+            // Remember how much white text the open panel has, to spot it without OCR from now on.
+            if (read.Progress.Values.Count(p => p.Xp != null) >= Roles.MinRoles)
+            {
+                int learned = PanelGate.Learn(settings.PanelWhite, white, inRange);
+                if (Math.Abs(learned - settings.PanelWhite) > settings.PanelWhite / 20)
+                {
+                    settings.PanelWhite = learned; Program.SaveSettings();
+                    Log.Write($"panel text learned: {learned} white pixels");
+                }
+            }
+            var game = GameScreen.GameProcess();
             var roles = string.Join(",", read.Order.OrderBy(x => x));
             if (roles != lastRoles) { Log.Write($"reading roles: {roles}"); lastRoles = roles; }
             if (read.Count >= Roles.MinRoles) UseRead(read);

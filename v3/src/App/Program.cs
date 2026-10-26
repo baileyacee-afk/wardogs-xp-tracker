@@ -20,7 +20,7 @@ namespace Wardogs.App
     public static class Program
     {
         // Matches the GitHub release tag and CHANGELOG.md.
-        public const string Version = "3.0";
+        public const string Version = "3.1";
 
         public static bool Demo { get; private set; }
         public static bool Exiting { get; private set; }

@@ -95,6 +95,7 @@ namespace Wardogs.Core
         public bool ClickThrough { get; set; }
         public string PanelRect { get; set; }       // "x,y,w,h": where the in-game Wardog Level panel was last found
         public int PanelRoles { get; set; }         // how many roles were readable when it was found
+        public int PanelWhite { get; set; }         // white text pixels in the open panel (learned), to spot it without OCR
         public bool Continuous { get; set; } = true;   // live popup tracking on
         public int PopupPollMs { get; set; } = 300; // how often the popup area is checked
         public string PopupRect { get; set; }       // "x,y,w,h": where popups appear; default is under the cash boxes

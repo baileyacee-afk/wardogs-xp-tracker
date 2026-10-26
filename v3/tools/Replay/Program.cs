@@ -19,6 +19,19 @@ static class Program
     static int Main(string[] args)
     {
         if (args.Length >= 2 && args[0] == "--data") return CheckData(args[1]);
+        if (args.Length >= 1 && args[0] == "--panel") return PanelReplay();
+        if (args.Length >= 2 && args[0] == "--ocr")
+        {
+            // --ocr <image> [x y w h]: the words and panel read from one picture
+            using var src = (Bitmap)Image.FromFile(args[1]);
+            var r = args.Length >= 6 ? new Rectangle(int.Parse(args[2]), int.Parse(args[3]), int.Parse(args[4]), int.Parse(args[5])) : new Rectangle(0, 0, src.Width, src.Height);
+            using var bmp = src.Clone(r, PixelFormat.Format24bppRgb);
+            var words = Ocr.Read(bmp);
+            Console.WriteLine(string.Join(" | ", words.Select(w => $"{w.Text}@{w.X:N0},{w.Y:N0}")));
+            var read = PanelReader.Read(words);
+            Console.WriteLine($"roles {read.Count}: " + string.Join(" ", read.Order.Select(x => $"{x}=Lv{read.Progress[x].Level}/{read.Progress[x].Xp}/{read.Progress[x].NextXp}")));
+            return 0;
+        }
         return Replay(args);
     }
 
@@ -44,6 +57,50 @@ static class Program
         tr.Save();
         var again = new Tracker(tmp);
         Console.WriteLine($"round trip: history {again.History.Count}, last {again.State.Last.Count} roles, levels {string.Join(",", again.State.Levels.Select(l => l.Key + "=" + l.Value))}");
+        return 0;
+    }
+
+    // The worker's panel check (pixel count, OCR only when it looks open) over every recorded frame.
+    static int PanelReplay()
+    {
+        var samples = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WardogsXpTracker", "samples");
+        var rect = new Rectangle(312, 20, 399, 381);   // the panel box, in the recorded corner's coordinates
+        int learnedWhite = 0, ocrs = 0, reads = 0, frames = 0; int[] lastGrid = null; DateTime lastOcr = DateTime.MinValue; bool open = false;
+        foreach (var sess in Directory.GetDirectories(samples).OrderBy(x => x))
+        {
+            var day = DateTime.ParseExact(Path.GetFileName(sess).Substring(0, 10), "yyyy-MM-dd", CultureInfo.InvariantCulture);
+            var lastCheck = DateTime.MinValue;
+            foreach (var f in Directory.GetFiles(Path.Combine(sess, "frames"), "*.jpg").OrderBy(x => x, StringComparer.Ordinal))
+            {
+                var now = day + TimeSpan.ParseExact(Path.GetFileNameWithoutExtension(f), @"hhmmss\-fff", CultureInfo.InvariantCulture);
+                if ((now - lastCheck).TotalSeconds < 0.95) continue;   // checked once a second
+                lastCheck = now; frames++;
+                Bitmap bmp;
+                using (var src = (Bitmap)Image.FromFile(f)) bmp = src.Clone(rect, PixelFormat.Format24bppRgb);
+                using (bmp)
+                {
+                    var grid = PixelMath.WhiteGrid(bmp, 24, 16, PopupTuning.GateWhite, PopupTuning.GateSpread);
+                    int white = PixelMath.Sum(grid);
+                    bool changed = PixelMath.GridDiff(grid, lastGrid) >= 0.03;
+                    double since = (now - lastOcr).TotalSeconds;
+                    if (!PanelGate.ShouldRead(white, changed, since, open, learnedWhite, out bool inRange))
+                    {
+                        if (white < 30 || (learnedWhite > 0 && !inRange)) open = false;
+                        continue;
+                    }
+                    lastGrid = grid; lastOcr = now; ocrs++;
+                    var read = PanelReader.Read(Ocr.Read(bmp));
+                    open = read.Count > 0;
+                    if (read.Progress.Values.Count(p => p.Xp != null) >= Roles.MinRoles)
+                    {
+                        reads++;
+                        learnedWhite = PanelGate.Learn(learnedWhite, white, inRange);
+                        Console.WriteLine($"{now:HH:mm:ss.f} read {read.Count} roles ({string.Join(" ", read.Order.Select(r => r + "=" + read.Progress[r].Xp))})  white {white}{(inRange ? "" : " (fallback look)")}");
+                    }
+                }
+            }
+        }
+        Console.WriteLine($"checks {frames}, OCR runs {ocrs} ({100.0 * ocrs / Math.Max(1, frames):N1}%), reads {reads}, learned white {learnedWhite}");
         return 0;
     }
 
