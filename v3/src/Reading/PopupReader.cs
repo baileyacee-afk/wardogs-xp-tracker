@@ -78,21 +78,47 @@ namespace Wardogs.Reading
             ["KILL"] = "infantry", ["BUILDING COMPLETE"] = "support", ["SPOTTED TARGET DESTROYED"] = "recon",
             ["REVIVED TEAMMATE"] = "medic", ["REVIVED PLAYER ASSIST"] = "medic", ["BUILDING"] = "support",
             ["SUPPLIES DEPOSITED"] = "support",
+            ["TARGET SPOTTED"] = "recon", ["SPOTTED VEHICLE DESTROYED"] = "recon",
+            ["HEALED TEAMMATE"] = "medic", ["HELPED REVIVE TEAMMATE"] = "medic",
         };
         // Reasons shared by a few classes: the symbol decides between these.
         public static readonly Dictionary<string, string[]> ReasonChoices = new(StringComparer.OrdinalIgnoreCase)
         {
             ["PASSENGER SURVIVED"] = new[] { "driver", "pilot" }, ["SUPPLIES DELIVERED"] = new[] { "driver", "pilot" },
         };
-        // Every reason seen so far, used to clean up OCR spelling ("BUILDIN" -> "BUILDING"). Same order as
-        // the PowerShell version, so ties resolve the same way.
+        // Other XP reasons seen in matches; the symbol decides the class.
+        static readonly string[] OtherXpReasons =
+        {
+            "APPLIED STIM", "BUILDABLE DESTROYED", "BUILDABLE DESTROYED ASSIST", "DESTROYED SUPPLY CRATE", "ARTILLERY KILL",
+            "FOB SUPPLIED ASSIST", "FOB HACKED", "ROUND TRIP", "SHUTDOWN KILL", "HEADSHOT KILL", "REVENGE KILL",
+            "VEHICLE DESTROYED", "VEHICLE DESTROYED ASSIST", "TRACKS DESTROYED", "MAGNET ACTIVATED", "DANGEROUS DUD",
+            "SPAWN VEHICLE DELIVERED",
+        };
+        // Reasons that only ever pay cash. One of these read as XP is a misread "+$160" ("560") next to a
+        // small icon, never real XP.
+        public static readonly HashSet<string> CashOnlyReasons = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "CONTROL ZONE ENTERED", "CONTROL ZONE PRESENCE", "HOTZONE PRESENCE", "VEHICLE REFUELLING", "AIR TIME BONUS",
+            "WAITED TO BE REVIVED", "SUPPLIES DESTROYED",
+        };
+        // Every reason seen so far, used to clean up OCR spelling ("BUILDIN" -> "BUILDING"). The first ones
+        // are in the PowerShell version's order, so ties resolve the same way.
         static readonly string[] KnownReasons =
         {
             "KILL ASSIST", "TARGET SPOTTED REFRESHED", "TACTICAL DEPLOYMENT", "KILL", "BUILDING COMPLETE", "SPOTTED TARGET DESTROYED",
             "REVIVED TEAMMATE", "REVIVED PLAYER ASSIST", "BUILDING", "SUPPLIES DEPOSITED", "PASSENGER SURVIVED", "SUPPLIES DELIVERED",
             "CONTROL ZONE ENTERED", "CONTROL ZONE PRESENCE", "HOTZONE PRESENCE", "VEHICLE REFUELLING", "AIR TIME BONUS",
             "WAITED TO BE REVIVED", "SUPPLIES DESTROYED",
+            "TARGET SPOTTED", "SPOTTED VEHICLE DESTROYED", "HEALED TEAMMATE", "HELPED REVIVE TEAMMATE",
+            "APPLIED STIM", "BUILDABLE DESTROYED", "BUILDABLE DESTROYED ASSIST", "DESTROYED SUPPLY CRATE", "ARTILLERY KILL",
+            "FOB SUPPLIED ASSIST", "FOB HACKED", "ROUND TRIP", "SHUTDOWN KILL", "HEADSHOT KILL", "REVENGE KILL",
+            "VEHICLE DESTROYED", "VEHICLE DESTROYED ASSIST", "TRACKS DESTROYED", "MAGNET ACTIVATED", "DANGEROUS DUD",
+            "SPAWN VEHICLE DELIVERED",
         };
+
+        // A reason known to give XP (so a number next to a class symbol can be read as XP without the "XP").
+        public static bool IsXpReason(string reason) =>
+            reason != null && (ReasonRoles.ContainsKey(reason) || ReasonChoices.ContainsKey(reason) || OtherXpReasons.Contains(reason, StringComparer.OrdinalIgnoreCase));
         // OCR's guess at a symbol when it reads it as a character after "XP".
         static readonly Dictionary<string, string> SymbolHints = new(StringComparer.OrdinalIgnoreCase) { ["A"] = "infantry", ["+"] = "medic", ["&"] = "support" };
 
@@ -242,6 +268,8 @@ namespace Wardogs.Reading
                     var glyph = PixelMath.Glyph(bmp, sym, PopupTuning.GlyphSize, PopupTuning.WhiteMin, PopupTuning.WhiteSpread);
                     if (glyph != null && Symbols.LooksLikeSymbol(glyph)) row.Glyph = glyph;
                     // OCR lost the "XP" ("KILL 2505P*", "BUILDING 8"), but the symbol is there: read it as XP.
+                    // Only for reasons known to give XP: a garbled reason next to a small icon is just as often
+                    // a cash row whose "$" was misread ("CONTROL ZONE PRESENCE +$160" -> "ZNE PRE 560").
                     if (row.Glyph != null && row.Kind != "xp" && !text.Contains('$'))
                     {
                         var tok = Regex.Replace(a.Text, "^[+*•]", "", I);
@@ -250,7 +278,7 @@ namespace Wardogs.Reading
                         if (m1.Success) num = m1.Groups["n"].Value;
                         else { var m2 = Regex.Match(tok, @"^(?<n>\d{1,4})\W*$", I); if (m2.Success) num = m2.Groups["n"].Value; }
                         var reason = ReasonName(Join(ws.Where(w => w.X < a.X)));
-                        if (!string.IsNullOrEmpty(num) && !string.IsNullOrEmpty(reason))
+                        if (!string.IsNullOrEmpty(num) && IsXpReason(reason))
                         {
                             row.Kind = "xp"; row.Amount = int.Parse(num); row.Reason = reason; row.AmountWord = a; row.Uncertain = false;
                         }
@@ -258,6 +286,8 @@ namespace Wardogs.Reading
                     // ...and a "cash" row with a class symbol is really an XP row with a misread amount.
                     if (row.Glyph != null && row.Kind == "cash" && row.Uncertain) row.Kind = "unparsed";
                 }
+                // Reasons that only pay cash are never XP, however the amount was read.
+                if (row.Kind == "xp" && CashOnlyReasons.Contains(row.Reason)) row.Kind = "unparsed";
                 rows.Add(row);
             }
             return rows;

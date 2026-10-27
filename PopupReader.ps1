@@ -152,13 +152,29 @@ $ReasonRoles = @{
     'BUILDING' = 'support'; 'BUILDING COMPLETE' = 'support'; 'SUPPLIES DEPOSITED' = 'support'
     'SPOTTED TARGET DESTROYED' = 'recon'; 'TARGET SPOTTED REFRESHED' = 'recon'
     'TACTICAL DEPLOYMENT' = 'pilot'
+    'TARGET SPOTTED' = 'recon'; 'SPOTTED VEHICLE DESTROYED' = 'recon'
+    'HEALED TEAMMATE' = 'medic'; 'HELPED REVIVE TEAMMATE' = 'medic'
 }
 # Reasons shared by a few classes: the symbol decides between these.
 $ReasonChoices = @{ 'SUPPLIES DELIVERED' = @('driver', 'pilot'); 'PASSENGER SURVIVED' = @('driver', 'pilot') }
-# Every reason seen so far, used to clean up OCR spelling ("BUILDIN" -> "BUILDING").
-$KnownReasons = @($ReasonRoles.Keys) + @($ReasonChoices.Keys) + @(
-    'CONTROL ZONE ENTERED', 'CONTROL ZONE PRESENCE', 'HOTZONE PRESENCE', 'VEHICLE REFUELLING', 'AIR TIME BONUS',
+# Other XP reasons seen in matches; the symbol decides the class.
+$OtherXpReasons = @(
+    'APPLIED STIM', 'BUILDABLE DESTROYED', 'BUILDABLE DESTROYED ASSIST', 'DESTROYED SUPPLY CRATE', 'ARTILLERY KILL',
+    'FOB SUPPLIED ASSIST', 'FOB HACKED', 'ROUND TRIP', 'SHUTDOWN KILL', 'HEADSHOT KILL', 'REVENGE KILL',
+    'VEHICLE DESTROYED', 'VEHICLE DESTROYED ASSIST', 'TRACKS DESTROYED', 'MAGNET ACTIVATED', 'DANGEROUS DUD',
+    'SPAWN VEHICLE DELIVERED')
+# Reasons that only ever pay cash. One of these read as XP is a misread "+$160" ("560") next to a
+# small icon, never real XP.
+$CashOnlyReasons = @('CONTROL ZONE ENTERED', 'CONTROL ZONE PRESENCE', 'HOTZONE PRESENCE', 'VEHICLE REFUELLING', 'AIR TIME BONUS',
     'WAITED TO BE REVIVED', 'SUPPLIES DESTROYED')
+# Every reason seen so far, used to clean up OCR spelling ("BUILDIN" -> "BUILDING").
+$KnownReasons = @(
+    'KILL ASSIST', 'TARGET SPOTTED REFRESHED', 'TACTICAL DEPLOYMENT', 'KILL', 'BUILDING COMPLETE', 'SPOTTED TARGET DESTROYED',
+    'REVIVED TEAMMATE', 'REVIVED PLAYER ASSIST', 'BUILDING', 'SUPPLIES DEPOSITED', 'PASSENGER SURVIVED', 'SUPPLIES DELIVERED') +
+    $CashOnlyReasons + @('TARGET SPOTTED', 'SPOTTED VEHICLE DESTROYED', 'HEALED TEAMMATE', 'HELPED REVIVE TEAMMATE') + $OtherXpReasons
+
+# A reason known to give XP (so a number next to a class symbol can be read as XP without the "XP").
+function Test-XpReason([string]$Reason) { $Reason -and ($ReasonRoles.ContainsKey($Reason) -or $ReasonChoices.ContainsKey($Reason) -or $OtherXpReasons -contains $Reason) }
 
 # OCR's guess at a symbol when it reads it as a character after "XP".
 $SymbolHints = @{ 'A' = 'infantry'; '+' = 'medic'; '&' = 'support' }
@@ -282,15 +298,19 @@ function Get-PopupRows([System.Drawing.Bitmap]$Bitmap, $Words) {
             $glyph = [WdPopup]::Glyph($Bitmap, $sym, $PopupGlyphSize, $PopupWhiteMin, $PopupWhiteSpread)
             if ($glyph -and (Test-SymbolShape $glyph)) { $row.Glyph = $glyph }
             # OCR lost the "XP" ("KILL 2505P*", "BUILDING 8"), but the symbol is there: read it as XP.
+            # Only for reasons known to give XP: a garbled reason next to a small icon is just as often
+            # a cash row whose "$" was misread ("CONTROL ZONE PRESENCE +$160" -> "ZNE PRE 560").
             if ($row.Glyph -and $row.Kind -ne 'xp' -and $text -notmatch '\$') {
                 $tok = $a.Text -replace '^[+*\x2022]', ''
                 $num = if ($tok -match '^(?<n>\d{1,4}?)[5S]?[XxPpF]{1,2}\W*$') { $matches.n } elseif ($tok -match '^(?<n>\d{1,4})\W*$') { $matches.n } else { $null }
                 $reason = ConvertTo-ReasonName ((($ws | Where-Object { $_.X -lt $a.X }) | ForEach-Object Text) -join ' ')
-                if ($num -and $reason) { $row.Kind = 'xp'; $row.Amount = [int]$num; $row.Reason = $reason; $row.AmountWord = $a; $row.Uncertain = $false }
+                if ($num -and (Test-XpReason $reason)) { $row.Kind = 'xp'; $row.Amount = [int]$num; $row.Reason = $reason; $row.AmountWord = $a; $row.Uncertain = $false }
             }
             # ...and a "cash" row with a class symbol is really an XP row with a misread amount.
             if ($row.Glyph -and $row.Kind -eq 'cash' -and $row.Uncertain) { $row.Kind = 'unparsed' }
         }
+        # Reasons that only pay cash are never XP, however the amount was read.
+        if ($row.Kind -eq 'xp' -and $CashOnlyReasons -contains $row.Reason) { $row.Kind = 'unparsed' }
         [pscustomobject]$row
     }
 }

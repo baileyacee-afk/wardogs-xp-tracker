@@ -3,6 +3,18 @@
 Versions match the [GitHub releases](https://github.com/baileyacee-afk/wardogs-xp-tracker/releases).
 The version you're running shows when you hover over the tray icon.
 
+## v3.2 (preview) and v2.7
+
+- **No more fake XP from cash popups.** "CONTROL ZONE PRESENCE +$160" could be misread as "560"
+  next to a small icon and counted as XP for a random class (Pilot, Support, ...). Cash-only
+  reasons (zone presence, refuelling and the like) can no longer become XP, and a number with no
+  "XP" next to it is only read as XP when its reason is a known XP reason. Anything else counts as
+  an unreadable popup in the match's confidence notes instead.
+- **More XP reasons recognised** from recent matches: Target Spotted and Spotted Vehicle Destroyed
+  (Recon), Healed Teammate and Helped Revive Teammate (Medic), plus Applied Stim, Shutdown/Headshot/
+  Revenge/Artillery Kill, Vehicle Destroyed, FOB Hacked, Round Trip and others (class from the
+  symbol). They're spelled and grouped properly in match details now.
+
 ## v2.6
 
 The Wardog Level fix from v3.1, for the PowerShell version:
