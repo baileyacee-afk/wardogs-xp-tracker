@@ -20,7 +20,8 @@ namespace Wardogs.App
     public static class Program
     {
         // Matches the GitHub release tag and CHANGELOG.md.
-        public const string Version = "3.2";
+        public const string Version = "3.3";
+        public const string ReleasesUrl = "https://github.com/baileyacee-afk/wardogs-xp-tracker/releases";
 
         public static bool Demo { get; private set; }
         public static bool Exiting { get; private set; }

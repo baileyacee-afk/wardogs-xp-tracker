@@ -21,7 +21,8 @@
 param([switch]$Demo)
 
 # Matches the GitHub release tag (v1.0, v1.1, ...) and CHANGELOG.md.
-$AppVersion = '2.7'
+$AppVersion = '2.8'
+$ReleasesUrl = 'https://github.com/baileyacee-afk/wardogs-xp-tracker/releases'
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -1447,6 +1448,9 @@ $miScDesk.add_Click({ Switch-Shortcut 'Desktop' 'DesktopShortcut' $miScDesk })
 $miScBoot.add_Click({ Switch-Shortcut 'Startup' 'StartWithWindows' $miScBoot })
 $menu.Items.Add($miShortcuts) | Out-Null
 $miFolder  = $menu.Items.Add('Open data folder')
+# Every release on GitHub (downloads and what changed in each).
+$miVersions = $menu.Items.Add("Versions (you have v$AppVersion)...")
+$miVersions.add_Click({ try { Start-Process $ReleasesUrl } catch { Write-Log "open releases ERROR $_" } })
 $menu.Items.Add('-') | Out-Null
 $miQuit    = $menu.Items.Add('Quit')
 

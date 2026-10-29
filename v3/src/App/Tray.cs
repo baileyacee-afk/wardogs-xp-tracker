@@ -73,6 +73,12 @@ namespace Wardogs.App
             miShortcuts.DropDownItems.Add(miScStart); miShortcuts.DropDownItems.Add(miScDesk);
             menu.Items.Add(miShortcuts);
             Add("Open data folder", () => System.Diagnostics.Process.Start("explorer.exe", Program.DataDir));
+            // Every release on GitHub (downloads and what changed in each).
+            Add($"Versions (you have v{Program.Version})...", () =>
+            {
+                try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Program.ReleasesUrl) { UseShellExecute = true }); }
+                catch (Exception e) { Core.Log.Write("open releases ERROR " + e.Message); }
+            });
             menu.Items.Add(new ToolStripSeparator());
             Add("Exit", () => Program.Exit());
 

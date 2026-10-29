@@ -3,6 +3,11 @@
 Versions match the [GitHub releases](https://github.com/baileyacee-afk/wardogs-xp-tracker/releases).
 The version you're running shows when you hover over the tray icon.
 
+## v3.3 (preview) and v2.8
+
+- **Versions** in the tray menu (it shows the version you have) opens the GitHub page with every
+  release, to download another version or see what changed.
+
 ## v3.2 (preview) and v2.7
 
 - **No more fake XP from cash popups.** "CONTROL ZONE PRESENCE +$160" could be misread as "560"
