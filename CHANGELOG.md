@@ -3,6 +3,11 @@
 Versions match the [GitHub releases](https://github.com/baileyacee-afk/wardogs-xp-tracker/releases).
 The version you're running shows when you hover over the tray icon.
 
+## v3.4 (preview) and v2.9
+
+- **VERSIONS button** at the bottom right of the tracker window, next to the version you're
+  running. It opens the GitHub page with every release (same as Versions in the tray menu).
+
 ## v3.3 (preview) and v2.8
 
 - **Versions** in the tray menu (it shows the version you have) opens the GitHub page with every

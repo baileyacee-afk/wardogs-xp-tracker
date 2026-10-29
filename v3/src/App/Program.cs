@@ -20,7 +20,7 @@ namespace Wardogs.App
     public static class Program
     {
         // Matches the GitHub release tag and CHANGELOG.md.
-        public const string Version = "3.3";
+        public const string Version = "3.4";
         public const string ReleasesUrl = "https://github.com/baileyacee-afk/wardogs-xp-tracker/releases";
 
         public static bool Demo { get; private set; }
@@ -270,6 +270,13 @@ namespace Wardogs.App
             Worker.ResetPopups();
             Log.Write($"popup area set to {Settings.PopupRect}");
             Tray.Balloon("Wardogs XP Tracker", "Popup area saved.");
+        }
+
+        // Every release on GitHub (downloads and what changed in each).
+        public static void OpenReleases()
+        {
+            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ReleasesUrl) { UseShellExecute = true }); }
+            catch (Exception e) { Log.Write("open releases ERROR " + e.Message); }
         }
 
         public static void Exit()

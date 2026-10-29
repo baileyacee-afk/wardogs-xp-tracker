@@ -44,6 +44,7 @@ namespace Wardogs.App
             ((Button)ui["BtnNext"]).Click += (_, _) => EndMatch();
             ((Button)ui["BtnDetails"]).Click += (_, _) => MatchDetails.Show(null);
             ((Button)ui["BtnHide"]).Click += (_, _) => HideToTray();
+            ((Button)ui["BtnVersions"]).Click += (_, _) => Program.OpenReleases();
             // Drag from any empty spot to move it (buttons still click normally).
             Win.MouseLeftButtonDown += (_, e) =>
             {
@@ -124,10 +125,10 @@ namespace Wardogs.App
           </Grid>
         </StackPanel>");
             }
-            foreach (var n in new[] { "Frame", "Header", "TxtWardogLv", "TxtLvGain", "BtnDetails", "BtnNext", "BtnHide", "TxtMaxed", "Badge", "TxtNote", "TxtCash", "HistoryList", "TxtStatus" }) names.Add(n);
+            foreach (var n in new[] { "Frame", "Header", "TxtWardogLv", "TxtLvGain", "BtnDetails", "BtnNext", "BtnHide", "TxtMaxed", "Badge", "TxtNote", "TxtCash", "HistoryList", "TxtStatus", "BtnVersions" }) names.Add(n);
 
             return Theme.Fill(MainXaml.Replace("@CHIPS@", chips.ToString()).Replace("@ROWS@", rows.ToString())
-                .Replace("@ROLECOUNT@", Roles.Order.Length.ToString()));
+                .Replace("@ROLECOUNT@", Roles.Order.Length.ToString()).Replace("@VERSION@", Program.Version));
         }
 
         const string MainXaml = @"
@@ -222,8 +223,12 @@ namespace Wardogs.App
       <TextBlock Text=""RECENT MATCHES"" FontSize=""11"" FontWeight=""SemiBold"" Foreground=""%GOLD%"" Margin=""14,0,14,2""/>
       <StackPanel x:Name=""HistoryList"" Margin=""14,0,14,0""/>
 
-      <Border Background=""#0F0C08"" CornerRadius=""0,0,6,6"" Margin=""0,10,0,0"" Padding=""14,7"">
-        <TextBlock x:Name=""TxtStatus"" Text=""Starting..."" FontSize=""11"" Foreground=""%DIM%"" TextWrapping=""Wrap""/>
+      <Border Background=""#0F0C08"" CornerRadius=""0,0,6,6"" Margin=""0,10,0,0"" Padding=""14,7,10,7"">
+        <DockPanel>
+          <Button x:Name=""BtnVersions"" DockPanel.Dock=""Right"" VerticalAlignment=""Top"" Margin=""8,0,0,0"" Style=""{StaticResource Flat}"" FontSize=""10""
+                  Content=""v@VERSION@ &#x00B7; VERSIONS"" ToolTip=""Every version on GitHub: download another one or see what changed""/>
+          <TextBlock x:Name=""TxtStatus"" Text=""Starting..."" FontSize=""11"" Foreground=""%DIM%"" TextWrapping=""Wrap""/>
+        </DockPanel>
       </Border>
     </StackPanel>
   </Border>

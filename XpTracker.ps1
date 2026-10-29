@@ -21,7 +21,7 @@
 param([switch]$Demo)
 
 # Matches the GitHub release tag (v1.0, v1.1, ...) and CHANGELOG.md.
-$AppVersion = '2.8'
+$AppVersion = '2.9'
 $ReleasesUrl = 'https://github.com/baileyacee-afk/wardogs-xp-tracker/releases'
 
 $ErrorActionPreference = 'Stop'
@@ -296,8 +296,12 @@ $($roleRows -join "`n")
       <StackPanel x:Name="HistoryList" Margin="14,0,14,0"/>
 
       <!-- status -->
-      <Border Background="#0F0C08" CornerRadius="0,0,6,6" Margin="0,10,0,0" Padding="14,7">
-        <TextBlock x:Name="TxtStatus" Text="Starting..." FontSize="11" Foreground="$Dim" TextWrapping="Wrap"/>
+      <Border Background="#0F0C08" CornerRadius="0,0,6,6" Margin="0,10,0,0" Padding="14,7,10,7">
+        <DockPanel>
+          <Button x:Name="BtnVersions" DockPanel.Dock="Right" VerticalAlignment="Top" Margin="8,0,0,0" Style="{StaticResource Flat}" FontSize="10"
+                  Content="v$AppVersion &#x00B7; VERSIONS" ToolTip="Every version on GitHub: download another one or see what changed"/>
+          <TextBlock x:Name="TxtStatus" Text="Starting..." FontSize="11" Foreground="$Dim" TextWrapping="Wrap"/>
+        </DockPanel>
       </Border>
     </StackPanel>
   </Border>
@@ -1471,6 +1475,7 @@ $tray.ContextMenuStrip = $menu
 $ui.BtnNext.add_Click({ Invoke-EndMatch })
 $ui.BtnDetails.add_Click({ Show-MatchDetails $null })
 $ui.BtnHide.add_Click({ Set-Visible $false })
+$ui.BtnVersions.add_Click({ try { Start-Process $ReleasesUrl } catch { Write-Log "open releases ERROR $_" } })
 # Drag from any empty spot to move it (buttons still click normally).
 $win.add_MouseLeftButtonDown({
     try { $win.DragMove() } catch { return }   # throws if the button was already released
