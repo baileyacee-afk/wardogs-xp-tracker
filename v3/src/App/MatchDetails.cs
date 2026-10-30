@@ -47,6 +47,12 @@ namespace Wardogs.App
             if (e.NetCash != null) Row("Cash this match (incl. gear bought)", Theme.Cash(e.NetCash.Value), Theme.Muted, CashColor(e.NetCash.Value), "SemiBold");
             Row("Cash from popups", Theme.Cash(e.Cash), Theme.Muted, CashColor(e.Cash), e.NetCash == null ? "SemiBold" : "Normal");
             if (e.ResultsCash != null) Row("Cash on the results screen", Theme.Cash(e.ResultsCash.Value), Theme.Muted, Theme.Ink);
+            if (events.Count > 0)
+            {
+                var (kills, assists) = Kills.Count(events);
+                Row("Kills", kills.ToString(), Theme.Muted, Theme.Ink);
+                Row("Kill assists", assists.ToString(), Theme.Muted, Theme.Ink);
+            }
 
             if (e.Warnings.Count > 0)
             {

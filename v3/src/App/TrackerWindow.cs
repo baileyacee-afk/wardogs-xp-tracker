@@ -125,7 +125,7 @@ namespace Wardogs.App
           </Grid>
         </StackPanel>");
             }
-            foreach (var n in new[] { "Frame", "Header", "TxtWardogLv", "TxtLvGain", "BtnDetails", "BtnNext", "BtnHide", "TxtMaxed", "Badge", "TxtNote", "TxtCash", "HistoryList", "TxtStatus", "BtnVersions" }) names.Add(n);
+            foreach (var n in new[] { "Frame", "Header", "TxtWardogLv", "TxtLvGain", "BtnDetails", "BtnNext", "BtnHide", "TxtMaxed", "Badge", "TxtNote", "TxtCash", "TxtKills", "HistoryList", "TxtStatus", "BtnVersions" }) names.Add(n);
 
             return Theme.Fill(MainXaml.Replace("@CHIPS@", chips.ToString()).Replace("@ROWS@", rows.ToString())
                 .Replace("@ROLECOUNT@", Roles.Order.Length.ToString()).Replace("@VERSION@", Program.Version));
@@ -208,6 +208,10 @@ namespace Wardogs.App
       <Grid Margin=""14,6,14,0"">
         <TextBlock Text=""Cash this match"" FontSize=""12.5"" Foreground=""%MUTED%""/>
         <TextBlock x:Name=""TxtCash"" Text=""$0"" FontSize=""13"" FontWeight=""SemiBold"" HorizontalAlignment=""Right""/>
+      </Grid>
+      <Grid Margin=""14,2,14,0"" ToolTip=""Counted from the KILL and KILL ASSIST popups (cash and XP rows of the same kill count once)"">
+        <TextBlock Text=""Kills  ·  assists"" FontSize=""12.5"" Foreground=""%MUTED%""/>
+        <TextBlock x:Name=""TxtKills"" Text=""0  ·  0"" FontSize=""13"" FontWeight=""SemiBold"" HorizontalAlignment=""Right""/>
       </Grid>
 
       <Border Height=""1"" Background=""#2E271A"" Margin=""14,12,14,6""/>
@@ -292,6 +296,9 @@ namespace Wardogs.App
                 long cash = tracker.MatchCash();
                 E<TextBlock>("TxtCash").Text = Theme.Cash(cash) + (s.BankNow == null && s.CashUncertain > 0 ? $"  ({s.CashUncertain} uncertain)" : "");
                 E<TextBlock>("TxtCash").Foreground = cash > 0 ? Theme.GreenB : cash < 0 ? Theme.RedB : Theme.DimB;
+                var (kills, assists) = Kills.Count(s.Events);
+                E<TextBlock>("TxtKills").Text = $"{kills}  ·  {assists}";
+                E<TextBlock>("TxtKills").Foreground = kills + assists > 0 ? Theme.InkB : Theme.DimB;
 
                 // Every role's own progress toward its cap.
                 foreach (var r in Roles.Order)

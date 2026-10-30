@@ -21,7 +21,7 @@
 param([switch]$Demo)
 
 # Matches the GitHub release tag (v1.0, v1.1, ...) and CHANGELOG.md.
-$AppVersion = '2.9'
+$AppVersion = '2.10'
 $ReleasesUrl = 'https://github.com/baileyacee-afk/wardogs-xp-tracker/releases'
 
 $ErrorActionPreference = 'Stop'
@@ -279,6 +279,10 @@ $($bonusChips -join "`n")
         <TextBlock Text="Cash this match" FontSize="12.5" Foreground="$Muted"/>
         <TextBlock x:Name="TxtCash" Text="`$0" FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Right"/>
       </Grid>
+      <Grid Margin="14,2,14,0" ToolTip="Counted from the KILL and KILL ASSIST popups (cash and XP rows of the same kill count once)">
+        <TextBlock Text="Kills  &#x00B7;  assists" FontSize="12.5" Foreground="$Muted"/>
+        <TextBlock x:Name="TxtKills" Text="0  &#x00B7;  0" FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Right"/>
+      </Grid>
 
       <!-- roles -->
       <Border Height="1" Background="#2E271A" Margin="14,12,14,6"/>
@@ -384,6 +388,9 @@ function Update-UI {
     $cash = Get-MatchCash
     $ui.TxtCash.Text = (Format-Cash $cash) + $(if ($null -eq $State.BankNow -and [int]$State.CashUncertain -gt 0) { "  ($($State.CashUncertain) uncertain)" } else { '' })
     $ui.TxtCash.Foreground = if ($cash -gt 0) { $Brush.Green } elseif ($cash -lt 0) { New-Brush '#E0705A' } else { $Brush.Dim }
+    $k = Get-Kills $State.Events
+    $ui.TxtKills.Text = "$($k.Kills)  $([char]0xB7)  $($k.Assists)"
+    $ui.TxtKills.Foreground = if ($k.Kills + $k.Assists -gt 0) { $Brush.Ink } else { $Brush.Dim }
 
     # Every role's own progress toward its cap.
     $dot = [char]0xB7
@@ -1073,6 +1080,11 @@ function Get-MatchLines($Entry, $Events, [bool]$Live) {
     if ($null -ne $Entry.NetCash) { Add-Line 'Cash this match (incl. gear bought)' (Format-Cash ([long]$Entry.NetCash)) $Muted (& $cashColor ([long]$Entry.NetCash)) 'SemiBold' }
     Add-Line 'Cash from popups' (Format-Cash ([long]$Entry.Cash)) $Muted (& $cashColor ([long]$Entry.Cash)) $(if ($null -eq $Entry.NetCash) { 'SemiBold' } else { 'Normal' })
     if ($null -ne $Entry.ResultsCash) { Add-Line 'Cash on the results screen' (Format-Cash ([long]$Entry.ResultsCash)) $Muted $Ink }
+    if (@($Events).Count) {
+        $k = Get-Kills $Events
+        Add-Line 'Kills' "$($k.Kills)" $Muted $Ink
+        Add-Line 'Kill assists' "$($k.Assists)" $Muted $Ink
+    }
 
     if (@($Entry.Warnings).Count) {
         Add-Head 'CONFIDENCE'

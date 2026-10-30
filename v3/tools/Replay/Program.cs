@@ -13,12 +13,23 @@ using Wardogs.Reading;
 // Usage:
 //   Replay [session ...] [--events] [--out file.csv]   replay recorded frames through the popup reader
 //   Replay --data <dataDir>                           load a data folder the app would use and report it
+//   Replay --kills <dataDir>                          kills and assists counted in each saved match
 static class Program
 {
     [STAThread]
     static int Main(string[] args)
     {
         if (args.Length >= 2 && args[0] == "--data") return CheckData(args[1]);
+        if (args.Length >= 2 && args[0] == "--kills")
+        {
+            foreach (var f in Directory.GetFiles(Path.Combine(args[1], "matches"), "*.json").OrderBy(f => f))
+            {
+                var ev = Json.ReadList<PopupEvent>(f);
+                var (k, a) = Kills.Count(ev);
+                Console.WriteLine($"{Path.GetFileNameWithoutExtension(f)}  kills {k,3}  assists {a,3}");
+            }
+            return 0;
+        }
         if (args.Length >= 1 && args[0] == "--panel") return PanelReplay();
         if (args.Length >= 2 && args[0] == "--ocr")
         {

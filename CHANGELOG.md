@@ -3,6 +3,14 @@
 Versions match the [GitHub releases](https://github.com/baileyacee-afk/wardogs-xp-tracker/releases).
 The version you're running shows when you hover over the tray icon.
 
+## v3.5 (preview) and v2.10
+
+- **Kill and assist counter** under "Cash this match": kills and kill assists so far this match,
+  counted from the KILL / KILL ASSIST popups. A kill pays a cash row and then an XP row; the two
+  count as one kill, and if either one is misread the other still counts it. Headshot, shutdown,
+  revenge and artillery kills count; team kills don't. Match details show them too, also for
+  matches already saved.
+
 ## v3.4 (preview) and v2.9
 
 - **VERSIONS button** at the bottom right of the tracker window, next to the version you're

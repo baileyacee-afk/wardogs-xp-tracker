@@ -301,6 +301,26 @@ function Get-MatchCash($S = $script:State) {
     if ($null -ne $S.BankStart -and $null -ne $S.BankNow) { [long]$S.BankNow - [long]$S.BankStart } else { [long]$S.Cash }
 }
 
+# Kills and kill assists, counted from the popups. Each kill pays twice: a cash row ("KILL +$2,750") and,
+# a second or few later, an XP row ("KILL 250XP"). Either can be misread and missed, so a cash row and the
+# XP row that follows it count as one kill, and a row of either kind with no partner still counts.
+# Headshot, shutdown, revenge and artillery kills replace the plain "KILL" rows; team kills don't count.
+$KillReasons = @('KILL', 'HEADSHOT KILL', 'SHUTDOWN KILL', 'REVENGE KILL', 'ARTILLERY KILL')
+function Get-KillCount($Events, [string[]]$Reasons) {
+    $mine = @($Events | Where-Object { $_.Reason -and $Reasons -contains $_.Reason -and ($_.Kind -ne 'cash' -or [long]$_.Amount -gt 0) } |
+        ForEach-Object { [pscustomobject]@{ Kind = $_.Kind; T = $(if ($_.T -is [datetime]) { [datetimeoffset]$_.T } else { [datetimeoffset]::Parse([string]$_.T, [cultureinfo]::InvariantCulture) }); Paired = $false } } | Sort-Object T)
+    $cash = @($mine | Where-Object { $_.Kind -eq 'cash' })
+    $n = 0
+    foreach ($x in @($mine | Where-Object { $_.Kind -eq 'xp' })) {
+        $n++
+        # the cash row comes first, up to ~6 s before
+        $c = $cash | Where-Object { -not $_.Paired -and ($x.T - $_.T).TotalSeconds -le 7 -and ($_.T - $x.T).TotalSeconds -le 2 } | Select-Object -First 1
+        if ($c) { $c.Paired = $true }
+    }
+    $n + @($cash | Where-Object { -not $_.Paired }).Count
+}
+function Get-Kills($Events) { [pscustomobject]@{ Kills = Get-KillCount $Events $KillReasons; Assists = Get-KillCount $Events @('KILL ASSIST') } }
+
 # Files the match into history with its breakdown and starts the next one.
 # The bonus per role = XP after the match (this read) - XP when it ended (last read + popups since).
 function Complete-Match([switch]$NoFinalRead) {
