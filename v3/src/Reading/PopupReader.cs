@@ -74,8 +74,8 @@ namespace Wardogs.Reading
         // Reasons that always go to one class, so the symbol only matters for the others.
         public static readonly Dictionary<string, string> ReasonRoles = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["KILL ASSIST"] = "infantry", ["TARGET SPOTTED REFRESHED"] = "recon", ["TACTICAL DEPLOYMENT"] = "pilot",
-            ["KILL"] = "infantry", ["BUILDING COMPLETE"] = "support", ["SPOTTED TARGET DESTROYED"] = "recon",
+            ["TARGET SPOTTED REFRESHED"] = "recon", ["TACTICAL DEPLOYMENT"] = "pilot",
+            ["BUILDING COMPLETE"] = "support", ["SPOTTED TARGET DESTROYED"] = "recon",
             ["REVIVED TEAMMATE"] = "medic", ["REVIVED PLAYER ASSIST"] = "medic", ["BUILDING"] = "support",
             ["SUPPLIES DEPOSITED"] = "support",
             ["TARGET SPOTTED"] = "recon", ["SPOTTED VEHICLE DESTROYED"] = "recon",
@@ -89,11 +89,14 @@ namespace Wardogs.Reading
         // Other XP reasons seen in matches; the symbol decides the class.
         static readonly string[] OtherXpReasons =
         {
-            "APPLIED STIM", "BUILDABLE DESTROYED", "BUILDABLE DESTROYED ASSIST", "DESTROYED SUPPLY CRATE", "ARTILLERY KILL",
+            "KILL", "KILL ASSIST", "APPLIED STIM", "BUILDABLE DESTROYED", "BUILDABLE DESTROYED ASSIST", "DESTROYED SUPPLY CRATE", "ARTILLERY KILL",
             "FOB SUPPLIED ASSIST", "FOB HACKED", "ROUND TRIP", "SHUTDOWN KILL", "HEADSHOT KILL", "REVENGE KILL",
             "VEHICLE DESTROYED", "VEHICLE DESTROYED ASSIST", "TRACKS DESTROYED", "MAGNET ACTIVATED", "DANGEROUS DUD",
             "SPAWN VEHICLE DELIVERED",
         };
+        // Any class can kill (a Medic's SMG earns Medic XP), so kills go by the symbol; if it can't be read, to
+        // the class last seen for sure.
+        public static readonly HashSet<string> KillReasons = new(StringComparer.OrdinalIgnoreCase) { "KILL", "KILL ASSIST", "HEADSHOT KILL", "SHUTDOWN KILL", "REVENGE KILL", "ARTILLERY KILL" };
         // Reasons that only ever pay cash. One of these read as XP is a misread "+$160" ("560") next to a
         // small icon, never real XP.
         public static readonly HashSet<string> CashOnlyReasons = new(StringComparer.OrdinalIgnoreCase)
@@ -351,6 +354,8 @@ namespace Wardogs.Reading
         static Dictionary<string, double[]> drawn = new();
 
         sealed class Saved { public int N { get; set; } public double[] Sum { get; set; } }
+        const string CleanMark = "_assaultRelearned";
+        static string lastSure;
 
         // drawnGlyphs: each role's drawing as a glyph (rendered by the UI layer, which owns the drawings).
         public static void Init(string dataDir, Dictionary<string, double[]> drawnGlyphs)
@@ -364,6 +369,8 @@ namespace Wardogs.Reading
                 {
                     var saved = Json.Read<Dictionary<string, Saved>>(path);
                     if (saved != null) foreach (var kv in saved) if (kv.Value?.Sum != null) bank[kv.Key] = (kv.Value.N, kv.Value.Sum.ToArray());
+                    // Before v3.6 every KILL row taught "Assault", whatever class's symbol it showed. Start that one over.
+                    if (saved != null && !saved.ContainsKey(CleanMark)) { bank.Remove("infantry"); Save(); }
                 }
                 catch { }
             }
@@ -372,6 +379,7 @@ namespace Wardogs.Reading
         static void Save()
         {
             var o = bank.ToDictionary(kv => kv.Key, kv => new Saved { N = kv.Value.N, Sum = kv.Value.Sum.Select(v => Math.Round(v, 3)).ToArray() });
+            o[CleanMark] = new Saved();
             try { System.IO.File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(o)); } catch { }
         }
 
@@ -409,16 +417,25 @@ namespace Wardogs.Reading
             if (Popups.ReasonRoles.TryGetValue(row.Reason, out var role))
             {
                 AddExample(role, row.Glyph);
+                lastSure = role;
                 return role;
             }
             bool narrowed = Popups.ReasonChoices.TryGetValue(row.Reason, out var narrowedTo);
             var choices = narrowed ? narrowedTo : Roles.Order;
             bool hintOk = row.Hint != null && choices.Contains(row.Hint, StringComparer.OrdinalIgnoreCase);
-            if (row.Glyph == null) return hintOk ? row.Hint : null;
-            var best = choices.Select(r => (Role: r, S: PixelMath.Similarity(row.Glyph, Template(r)))).OrderByDescending(x => x.S).First();
+            string unsure = Popups.KillReasons.Contains(row.Reason) ? lastSure : null;
+            if (row.Glyph == null) return hintOk ? row.Hint : unsure;
+            var ranked = choices.Select(r => (Role: r, S: PixelMath.Similarity(row.Glyph, Template(r)))).OrderByDescending(x => x.S).ToList();
+            var best = ranked[0];
             if (best.S < 0.55 && hintOk) return row.Hint;
             // When the reason already narrows it to two or three classes, the closer symbol is enough.
-            if (best.S < (narrowed ? 0.25 : 0.45)) return null;
+            if (best.S < (narrowed ? 0.25 : 0.45)) return unsure;
+            // Kills with a clear symbol: remember the class, and learn Assault's symbol (no reason is Assault's alone).
+            if (ranked.Count > 1 && best.S >= 0.7 && best.S - ranked[1].S >= 0.1)
+            {
+                lastSure = best.Role;
+                if (best.Role == "infantry") AddExample(best.Role, row.Glyph);
+            }
             return best.Role;
         }
     }

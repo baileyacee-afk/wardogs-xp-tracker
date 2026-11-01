@@ -30,7 +30,7 @@ function Wait-WinRt($Operation, [Type]$ResultType) {
 $script:GameProc = $null
 $script:GameProcAt = [datetime]::MinValue
 function Get-GameProcess {
-    if (((Get-Date) - $script:GameProcAt).TotalSeconds -lt 5) {
+    if (([datetime]::UtcNow - $script:GameProcAt).TotalSeconds -lt 5) {
         if (-not $script:GameProc) { return $null }
         try { if (-not $script:GameProc.HasExited) { return $script:GameProc } } catch {}
     }
@@ -38,7 +38,7 @@ function Get-GameProcess {
         $_.Id -ne $PID -and $_.MainWindowHandle -ne [IntPtr]::Zero -and
         ($_.ProcessName -like 'Wardogs*' -or $_.MainWindowTitle.Trim() -eq 'Wardogs')
     } | Sort-Object { $_.ProcessName -ne 'WardogsClient-Win64-Shipping' } | Select-Object -First 1
-    $script:GameProcAt = Get-Date
+    $script:GameProcAt = [datetime]::UtcNow
     $script:GameProc
 }
 

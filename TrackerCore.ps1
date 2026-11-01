@@ -93,14 +93,14 @@ function Save-Tracker {
     try {
         ConvertTo-Json -InputObject $script:State -Depth 6 | Set-Content "$script:DataDir\match.json" -Encoding utf8 -ErrorAction Stop
         ConvertTo-Json -InputObject @($script:History) -Depth 6 | Set-Content "$script:DataDir\history.json" -Encoding utf8 -ErrorAction Stop
-        $script:LastSave = Get-Date
+        $script:LastSave = [datetime]::UtcNow
         $script:SaveDue = $false
     } catch { $script:SaveDue = $true }   # file busy (another program has it open): try again shortly
 }
 
 # Popups can arrive several times a second; write the files at most every few seconds.
 function Save-TrackerSoon {
-    if (((Get-Date) - $script:LastSave).TotalSeconds -ge 3) { Save-Tracker } else { $script:SaveDue = $true }
+    if (([datetime]::UtcNow - $script:LastSave).TotalSeconds -ge 3) { Save-Tracker } else { $script:SaveDue = $true }
 }
 function Save-TrackerIfDue { if ($script:SaveDue) { Save-Tracker } }
 

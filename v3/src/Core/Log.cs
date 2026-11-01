@@ -32,7 +32,7 @@ namespace Wardogs.Core
     {
         static readonly object sync = new object();
         static Dictionary<string, (int N, double Ms)> parts = new();
-        static DateTime since = DateTime.Now;
+        static DateTime since = DateTime.UtcNow;
 
         public static void Add(string name, Stopwatch sw)
         {
@@ -43,7 +43,7 @@ namespace Wardogs.Core
         {
             lock (sync)
             {
-                double secs = (DateTime.Now - since).TotalSeconds;
+                double secs = (DateTime.UtcNow - since).TotalSeconds;
                 if (secs < 60) return;
                 var text = string.Join("; ", parts.OrderBy(k => k.Key).Select(k => $"{k.Key} {k.Value.N}x {k.Value.Ms:N0}ms"));
                 double total = parts.Values.Sum(v => v.Ms);
@@ -51,7 +51,7 @@ namespace Wardogs.Core
                 double cpuPct = (cpu - lastCpu) / 1000 / secs * 100;
                 Log.Write($"perf (last {secs:N0}s, work {100 * total / 1000 / secs:N1}% of a core, process {cpuPct:N1}% of a core): {text}");
                 lastCpu = cpu;
-                parts = new(); since = DateTime.Now;
+                parts = new(); since = DateTime.UtcNow;
             }
         }
 

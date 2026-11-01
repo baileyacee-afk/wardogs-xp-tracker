@@ -17,6 +17,7 @@ namespace Wardogs.App
     //   - every 2 s: the cash at the top right and the Wardog Level panel (OCR only when it changed).
     // The window only draws; it hears about changes through the events below (raised on the UI thread).
     // Stop() ends the thread; nothing else keeps running in the background.
+    // Timing uses UTC: local time jumps back an hour when daylight saving ends, which would stall every schedule.
     public sealed class Worker
     {
         readonly Tracker tracker;
@@ -72,17 +73,17 @@ namespace Wardogs.App
 
         void Run()
         {
-            var nextSlow = DateTime.Now; var nextPanel = DateTime.Now.AddSeconds(1); var nextPopup = DateTime.Now;
+            var nextSlow = DateTime.UtcNow; var nextPanel = DateTime.UtcNow.AddSeconds(1); var nextPopup = DateTime.UtcNow;
             while (!cts.IsCancellationRequested)
             {
                 while (commands.TryDequeue(out var cmd)) Safe("command", cmd);
-                var now = DateTime.Now;
+                var now = DateTime.UtcNow;
                 if (now >= nextSlow) { nextSlow = now.AddSeconds(2); var sw = Stopwatch.StartNew(); Safe("poll", SlowPoll); Perf.Add("slow", sw); }
                 if (now >= nextPanel) { nextPanel = now.AddSeconds(1); var sw = Stopwatch.StartNew(); Safe("poll", PanelPoll); Perf.Add("panel-check", sw); }
                 if (now >= nextPopup) { nextPopup = now.AddMilliseconds(Math.Max(100, settings.PopupPollMs)); Safe("popup", PopupPoll); }
                 var next = nextSlow < nextPopup ? nextSlow : nextPopup;
                 if (nextPanel < next) next = nextPanel;
-                var wait = next - DateTime.Now;
+                var wait = next - DateTime.UtcNow;
                 wake.WaitOne(Math.Max(1, (int)wait.TotalMilliseconds));
             }
         }
@@ -168,13 +169,13 @@ namespace Wardogs.App
                 var grid = PixelMath.WhiteGrid(bmp, 24, 16, PopupTuning.GateWhite, PopupTuning.GateSpread);
                 white = PixelMath.Sum(grid);
                 bool changed = PixelMath.GridDiff(grid, panelLastGrid) >= 0.03;
-                double since = (DateTime.Now - panelLastOcr).TotalSeconds;
+                double since = (DateTime.UtcNow - panelLastOcr).TotalSeconds;
                 if (!PanelGate.ShouldRead(white, changed, since, panelOpen, settings.PanelWhite, out inRange))
                 {
                     if (white < 30 || (settings.PanelWhite > 0 && !inRange)) panelOpen = false;
                     return;
                 }
-                panelLastGrid = grid; panelLastOcr = DateTime.Now;
+                panelLastGrid = grid; panelLastOcr = DateTime.UtcNow;
                 var sw = Stopwatch.StartNew();
                 read = PanelReader.Read(Ocr.Read(bmp));
                 Perf.Add("panel-ocr", sw);
@@ -268,15 +269,16 @@ namespace Wardogs.App
                     Log.Write($"panel found at {settings.PanelRect} with roles: {read.Keys()}{(upgrade ? " (better lock)" : "")}");
                     findNote = "";
                     UseRead(read);
+                    if (manual) SetStatus($"Read the Wardog Level screen at {DateTime.Now:h:mm:ss tt}: totals updated.");
                     if (manual) Notify("Wardogs XP Tracker", $"Found the Wardog Level screen ({read.Count} of 6 roles). It will be read automatically from now on.");
                     return;
                 }
                 if (upgrade) continue;
                 // Keep a copy of what we saw (at most every 30 s) so a failed search can be checked.
-                if (manual || (DateTime.Now - lastScanSaved).TotalSeconds > 30)
+                if (manual || (DateTime.UtcNow - lastScanSaved).TotalSeconds > 30)
                 {
                     try { bmp.Save(Path.Combine(tracker.DataDir, "last-scan.png"), ImageFormat.Png); } catch { }
-                    lastScanSaved = DateTime.Now;
+                    lastScanSaved = DateTime.UtcNow;
                     Log.Write($"scan of {area} found {words.Count} words, roles: {read.Keys()} {(words.Count > 0 ? "| first words: " + string.Join(" ", words.Take(12).Select(w => w.Text)) : "")}");
                 }
             }
@@ -301,9 +303,9 @@ namespace Wardogs.App
             if (tracker.State.EndRequested != null) return;   // after the match: the results payout isn't this match's play
             using var bmp = GameScreen.Capture(Reading.Popups.CashRect());
             var grid = PixelMath.WhiteGrid(bmp, 24, 4, PopupTuning.GateWhite, PopupTuning.GateSpread);
-            bool stale = (DateTime.Now - cashLastOcr).TotalSeconds >= 10;
+            bool stale = (DateTime.UtcNow - cashLastOcr).TotalSeconds >= 10;
             if (PixelMath.GridDiff(grid, cashLastGrid) < 0.05 && !stale) return;
-            cashLastGrid = grid; cashLastOcr = DateTime.Now;
+            cashLastGrid = grid; cashLastOcr = DateTime.UtcNow;
             var read = Reading.Popups.ReadCashHud(bmp);
             if (read == null) return;
             long lifeStart = read.Value.Banked - read.Value.Life;
@@ -326,7 +328,7 @@ namespace Wardogs.App
             var own = Native.WindowRect(hwnd());
             if (!windowHidden() && !own.IsEmpty && rect.IntersectsWith(own)) { SetLive("blocked"); return; }
             SetLive("on");
-            var now = DateTime.Now;
+            var now = DateTime.UtcNow;
             var sw = Stopwatch.StartNew();
             bool ocr = false;
             using (var bmp = GameScreen.Capture(rect))
@@ -379,7 +381,7 @@ namespace Wardogs.App
                 int y = Math.Max(0, Num.R(row.Y - 0.6 * row.H)); int h = Math.Min(bmp.Height - y, Num.R(2.2 * row.H));
                 if (h <= 0) return;
                 using (var crop = bmp.Clone(new Rectangle(0, y, bmp.Width, h), PixelFormat.Format24bppRgb))
-                    crop.Save(Path.Combine(dir, now.ToString("yyyyMMdd-HHmmss-fff") + ".png"), ImageFormat.Png);
+                    crop.Save(Path.Combine(dir, DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + ".png"), ImageFormat.Png);
                 foreach (var f in new DirectoryInfo(dir).GetFiles("*.png").OrderByDescending(f => f.Name).Skip(50)) f.Delete();
             }
             catch { }

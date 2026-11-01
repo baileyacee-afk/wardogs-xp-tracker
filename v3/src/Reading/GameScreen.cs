@@ -20,13 +20,13 @@ namespace Wardogs.Reading
         {
             lock (sync)
             {
-                if ((DateTime.Now - gameAt).TotalSeconds < 5)
+                if ((DateTime.UtcNow - gameAt).TotalSeconds < 5)
                 {
                     if (game == null) return null;
                     try { if (!game.HasExited) return game; } catch { }
                 }
                 game = Find();
-                gameAt = DateTime.Now;
+                gameAt = DateTime.UtcNow;
                 return game;
             }
         }

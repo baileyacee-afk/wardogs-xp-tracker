@@ -44,7 +44,7 @@ namespace Wardogs.Core
                 {
                     Json.Write(Path.Combine(DataDir, "match.json"), State);
                     Json.Write(Path.Combine(DataDir, "history.json"), History);
-                    lastSave = DateTime.Now;
+                    lastSave = DateTime.UtcNow;
                     saveDue = false;
                 }
                 catch { saveDue = true; }   // file busy (another program has it open): try again shortly
@@ -54,7 +54,7 @@ namespace Wardogs.Core
         // Popups can arrive several times a second; write the files at most every few seconds.
         public void SaveSoon()
         {
-            lock (Sync) { if ((DateTime.Now - lastSave).TotalSeconds >= 3) Save(); else saveDue = true; }
+            lock (Sync) { if ((DateTime.UtcNow - lastSave).TotalSeconds >= 3) Save(); else saveDue = true; }
         }
 
         public void SaveIfDue() { lock (Sync) { if (saveDue) Save(); } }

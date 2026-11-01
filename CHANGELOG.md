@@ -3,6 +3,19 @@
 Versions match the [GitHub releases](https://github.com/baileyacee-afk/wardogs-xp-tracker/releases).
 The version you're running shows when you hover over the tray icon.
 
+## v3.6 (preview) and v2.11
+
+- **No more freezing when the clocks change.** When daylight saving ended, the tracker stopped reading
+  the screen for an hour and only hotkeys got through. Its timers no longer use local time.
+- **Kills go to the class you're playing.** A Medic's SMG kill earns Medic XP, but every KILL and KILL
+  ASSIST was counted as Assault. They now follow the class symbol on the popup. If the symbol can't be
+  read, they go to the class last seen for sure.
+- **Symbols cleaned up.** Those kills had also taught the tracker that the Medic cross was Assault's
+  symbol, which confused headshot kills and other rows too. The Assault symbol is relearned from scratch
+  once after updating; the other classes keep theirs.
+- **Ctrl+Shift+U says what happened**: the status line shows when it read the Wardog Level screen, or
+  tells you to open that screen first.
+
 ## v3.5 (preview) and v2.10
 
 - **Kill and assist counter** under "Cash this match": kills and kill assists so far this match,

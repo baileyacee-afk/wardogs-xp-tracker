@@ -30,6 +30,15 @@ static class Program
             }
             return 0;
         }
+        if (args.Length >= 2 && args[0] == "--symbols")
+        {
+            // --symbols <dataDir>: how alike the learned and drawn class symbols are
+            Symbols.Init(args[1], RoleIcons.DrawnGlyphs());
+            var drawn = RoleIcons.DrawnGlyphs();
+            foreach (var a in Roles.Order)
+                Console.WriteLine($"{a,-9} " + string.Join(" ", Roles.Order.Select(b => $"{b.Substring(0, 3)}={PixelMath.Similarity(Symbols.Template(a), Symbols.Template(b)):N2}")) + $"  vs its drawing {PixelMath.Similarity(Symbols.Template(a), drawn[a]):N2}");
+            return 0;
+        }
         if (args.Length >= 1 && args[0] == "--panel") return PanelReplay();
         if (args.Length >= 2 && args[0] == "--ocr")
         {

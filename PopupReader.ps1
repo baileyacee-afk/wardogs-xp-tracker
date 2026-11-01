@@ -147,7 +147,6 @@ $PopupLearnMax    = 40      # symbol examples kept per class
 
 # Reasons that always go to one class, so the symbol only matters for the others.
 $ReasonRoles = @{
-    'KILL' = 'infantry'; 'KILL ASSIST' = 'infantry'
     'REVIVED TEAMMATE' = 'medic'; 'REVIVED PLAYER ASSIST' = 'medic'
     'BUILDING' = 'support'; 'BUILDING COMPLETE' = 'support'; 'SUPPLIES DEPOSITED' = 'support'
     'SPOTTED TARGET DESTROYED' = 'recon'; 'TARGET SPOTTED REFRESHED' = 'recon'
@@ -159,10 +158,13 @@ $ReasonRoles = @{
 $ReasonChoices = @{ 'SUPPLIES DELIVERED' = @('driver', 'pilot'); 'PASSENGER SURVIVED' = @('driver', 'pilot') }
 # Other XP reasons seen in matches; the symbol decides the class.
 $OtherXpReasons = @(
-    'APPLIED STIM', 'BUILDABLE DESTROYED', 'BUILDABLE DESTROYED ASSIST', 'DESTROYED SUPPLY CRATE', 'ARTILLERY KILL',
+    'KILL', 'KILL ASSIST', 'APPLIED STIM', 'BUILDABLE DESTROYED', 'BUILDABLE DESTROYED ASSIST', 'DESTROYED SUPPLY CRATE', 'ARTILLERY KILL',
     'FOB SUPPLIED ASSIST', 'FOB HACKED', 'ROUND TRIP', 'SHUTDOWN KILL', 'HEADSHOT KILL', 'REVENGE KILL',
     'VEHICLE DESTROYED', 'VEHICLE DESTROYED ASSIST', 'TRACKS DESTROYED', 'MAGNET ACTIVATED', 'DANGEROUS DUD',
     'SPAWN VEHICLE DELIVERED')
+# Any class can kill (a Medic's SMG earns Medic XP), so kills go by the symbol; if it can't be read, to
+# the class last seen for sure.
+$KillReasons = @('KILL', 'KILL ASSIST', 'HEADSHOT KILL', 'SHUTDOWN KILL', 'REVENGE KILL', 'ARTILLERY KILL')
 # Reasons that only ever pay cash. One of these read as XP is a misread "+$160" ("560") next to a
 # small icon, never real XP.
 $CashOnlyReasons = @('CONTROL ZONE ENTERED', 'CONTROL ZONE PRESENCE', 'HOTZONE PRESENCE', 'VEHICLE REFUELLING', 'AIR TIME BONUS',
@@ -317,6 +319,7 @@ function Get-PopupRows([System.Drawing.Bitmap]$Bitmap, $Words) {
 
 # ---------------------------------------------------------------- class symbols
 $script:SymbolBank = $null       # learned from this screen: role -> @{ N; Sum }
+$script:LastSureRole = $null
 $script:SymbolDrawn = $null      # from the tracker's own drawings, until enough are learned
 
 function Get-SymbolBankPath { Join-Path $DataDir 'symbols.json' }
@@ -326,7 +329,9 @@ function Initialize-SymbolBank {
     try {
         if (Test-Path (Get-SymbolBankPath)) {
             $raw = Get-Content (Get-SymbolBankPath) -Raw | ConvertFrom-Json
-            foreach ($p in $raw.PSObject.Properties) { $script:SymbolBank[$p.Name] = @{ N = [int]$p.Value.N; Sum = [double[]]@($p.Value.Sum) } }
+            foreach ($p in $raw.PSObject.Properties) { if ($null -ne $p.Value.Sum) { $script:SymbolBank[$p.Name] = @{ N = [int]$p.Value.N; Sum = [double[]]@($p.Value.Sum) } } }
+            # Before v2.11 every KILL row taught "Assault", whatever class's symbol it showed. Start that one over.
+            if ($raw.PSObject.Properties.Name -notcontains '_assaultRelearned') { [void]$script:SymbolBank.Remove('infantry'); Save-SymbolBank }
         }
     } catch {}
 }
@@ -334,6 +339,7 @@ function Initialize-SymbolBank {
 function Save-SymbolBank {
     $out = [ordered]@{}
     foreach ($k in $script:SymbolBank.Keys) { $out[$k] = [ordered]@{ N = $script:SymbolBank[$k].N; Sum = @($script:SymbolBank[$k].Sum | ForEach-Object { [Math]::Round($_, 3) }) } }
+    $out['_assaultRelearned'] = [ordered]@{ N = 0; Sum = $null }
     ConvertTo-Json -InputObject $out -Depth 4 -Compress | Set-Content (Get-SymbolBankPath) -Encoding utf8
 }
 
@@ -384,16 +390,24 @@ function Get-PopupRole($Row) {
     if ($ReasonRoles.ContainsKey($Row.Reason)) {
         $role = $ReasonRoles[$Row.Reason]
         Add-SymbolExample $role $Row.Glyph
+        $script:LastSureRole = $role
         return $role
     }
     $narrowed = $ReasonChoices.ContainsKey($Row.Reason)
     $choices = if ($narrowed) { $ReasonChoices[$Row.Reason] } else { $RoleOrder }
-    if (-not $Row.Glyph) { if ($Row.Hint -and $choices -contains $Row.Hint) { return $Row.Hint }; return $null }
+    $unsure = if ($KillReasons -contains $Row.Reason) { $script:LastSureRole } else { $null }
+    if (-not $Row.Glyph) { if ($Row.Hint -and $choices -contains $Row.Hint) { return $Row.Hint }; return $unsure }
     $scores = foreach ($r in $choices) { [pscustomobject]@{ Role = $r; S = [WdPopup]::Similarity($Row.Glyph, (Get-SymbolTemplate $r)) } }
-    $best = $scores | Sort-Object S -Descending | Select-Object -First 1
+    $ranked = @($scores | Sort-Object S -Descending)
+    $best = $ranked[0]
     if ($best.S -lt 0.55 -and $Row.Hint -and $choices -contains $Row.Hint) { return $Row.Hint }
     # When the reason already narrows it to two or three classes, the closer symbol is enough.
-    if ($best.S -lt $(if ($narrowed) { 0.25 } else { 0.45 })) { return $null }
+    if ($best.S -lt $(if ($narrowed) { 0.25 } else { 0.45 })) { return $unsure }
+    # Kills with a clear symbol: remember the class, and learn Assault's symbol (no reason is Assault's alone).
+    if ($ranked.Count -gt 1 -and $best.S -ge 0.7 -and $best.S - $ranked[1].S -ge 0.1) {
+        $script:LastSureRole = $best.Role
+        if ($best.Role -eq 'infantry') { Add-SymbolExample $best.Role $Row.Glyph }
+    }
     $best.Role
 }
 

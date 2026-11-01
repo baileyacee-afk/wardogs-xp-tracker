@@ -21,7 +21,7 @@
 param([switch]$Demo)
 
 # Matches the GitHub release tag (v1.0, v1.1, ...) and CHANGELOG.md.
-$AppVersion = '2.10'
+$AppVersion = '2.11'
 $ReleasesUrl = 'https://github.com/baileyacee-afk/wardogs-xp-tracker/releases'
 
 $ErrorActionPreference = 'Stop'
@@ -686,14 +686,15 @@ function Find-Panel([switch]$Manual, [switch]$Upgrade) {
                 Write-Log "panel found at $($Settings.PanelRect) with roles: $($progress.Keys -join ', ')$(if ($Upgrade) { ' (better lock)' })"
                 $script:FindNote = ''
                 Use-Read $progress
+                if ($Manual) { Set-Status "Read the Wardog Level screen at $((Get-Date).ToString('h:mm:ss tt')): totals updated." }
                 if ($Manual) { $tray.ShowBalloonTip(2500, 'Wardogs XP Tracker', "Found the Wardog Level screen ($($progress.Count) of 6 roles). It will be read automatically from now on.", 'None') }
                 return
             }
             if ($Upgrade) { continue }
             # Keep a copy of what we saw (at most every 30 s) so a failed search can be checked.
-            if ($Manual -or ((Get-Date) - $script:LastScanSaved).TotalSeconds -gt 30) {
+            if ($Manual -or ([datetime]::UtcNow - $script:LastScanSaved).TotalSeconds -gt 30) {
                 $bmp.Save((Join-Path $DataDir 'last-scan.png'), [System.Drawing.Imaging.ImageFormat]::Png)
-                $script:LastScanSaved = Get-Date
+                $script:LastScanSaved = [datetime]::UtcNow
                 Write-Log "scan of $area found $($words.Count) words, roles: $($progress.Keys -join ', ') $(if ($words.Count) { '| first words: ' + (($words | Select-Object -First 12 | ForEach-Object Text) -join ' ') })"
             }
         } finally { $bmp.Dispose() }
@@ -777,13 +778,13 @@ function Invoke-PanelPoll {
             $grid = [WdPopup]::WhiteGrid($bmp, 24, 16, $PopupGateWhite, $PopupGateSpread)
             $white = [WdPopup]::Sum($grid)
             $changed = [WdPopup]::GridDiff($grid, $script:PanelLastGrid) -ge 0.03
-            $since = ((Get-Date) - $script:PanelLastOcr).TotalSeconds
+            $since = ([datetime]::UtcNow - $script:PanelLastOcr).TotalSeconds
             if (-not (Test-PanelWorthReading $white $changed $since $script:PanelOpen ([int]$Settings.PanelWhite))) {
                 if ($white -lt 30 -or ([int]$Settings.PanelWhite -gt 0 -and -not $script:PanelInRange)) { $script:PanelOpen = $false }
                 return
             }
             $inRange = $script:PanelInRange
-            $script:PanelLastGrid = $grid; $script:PanelLastOcr = Get-Date
+            $script:PanelLastGrid = $grid; $script:PanelLastOcr = [datetime]::UtcNow
             $osw = [Diagnostics.Stopwatch]::StartNew()
             $progress = Get-RoleProgress @(Read-OcrWords $bmp)
             Add-Perf 'panel-ocr' $osw
@@ -823,18 +824,18 @@ function Invoke-PanelPoll {
 # ---------------------------------------------------------------- live popups
 # Time spent per kind of work, written to the log once a minute (for keeping CPU use low).
 $script:Perf = @{}
-$script:PerfSince = Get-Date
+$script:PerfSince = [datetime]::UtcNow
 function Add-Perf([string]$Name, [System.Diagnostics.Stopwatch]$Sw) {
     $p = $script:Perf[$Name]; if (-not $p) { $p = @{ N = 0; Ms = 0 }; $script:Perf[$Name] = $p }
     $p.N++; $p.Ms += $Sw.Elapsed.TotalMilliseconds
 }
 function Write-PerfLog {
-    $secs = ((Get-Date) - $script:PerfSince).TotalSeconds
+    $secs = ([datetime]::UtcNow - $script:PerfSince).TotalSeconds
     if ($secs -lt 60) { return }
     $parts = foreach ($k in ($script:Perf.Keys | Sort-Object)) { "{0} {1}x {2:N0}ms" -f $k, $script:Perf[$k].N, $script:Perf[$k].Ms }
     $total = ($script:Perf.Values | ForEach-Object { $_.Ms } | Measure-Object -Sum).Sum
     Write-Log ("perf (last {0:N0}s, {1:N1}% of a core): {2}" -f $secs, (100 * $total / 1000 / $secs), ($parts -join '; '))
-    $script:Perf = @{}; $script:PerfSince = Get-Date
+    $script:Perf = @{}; $script:PerfSince = [datetime]::UtcNow
 }
 
 $script:LiveState = 'waiting'   # on | off | blocked | waiting
@@ -864,7 +865,7 @@ function Invoke-PopupPoll {
     $rect = Get-PopupRect
     if (-not $script:Hidden -and $rect.IntersectsWith((Get-OwnRect))) { Set-LiveState 'blocked'; return }
     Set-LiveState 'on'
-    $now = Get-Date
+    $now = [datetime]::UtcNow
     $sw = [Diagnostics.Stopwatch]::StartNew()
     $bmp = Get-ScreenBitmap $rect
     $ocr = $false
@@ -913,7 +914,7 @@ function Save-UnparsedRead([System.Drawing.Bitmap]$Bitmap, $Row, [datetime]$Now)
         New-Item -ItemType Directory -Force -Path $dir | Out-Null
         $y = [Math]::Max(0, [int]($Row.Y - 0.6 * $Row.H)); $h = [Math]::Min($Bitmap.Height - $y, [int](2.2 * $Row.H))
         $crop = $Bitmap.Clone((New-Object System.Drawing.Rectangle 0, $y, $Bitmap.Width, $h), [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
-        $crop.Save((Join-Path $dir ($Now.ToString('yyyyMMdd-HHmmss-fff') + '.png')), [System.Drawing.Imaging.ImageFormat]::Png); $crop.Dispose()
+        $crop.Save((Join-Path $dir ((Get-Date).ToString('yyyyMMdd-HHmmss-fff') + '.png')), [System.Drawing.Imaging.ImageFormat]::Png); $crop.Dispose()
         Get-ChildItem $dir -Filter '*.png' | Sort-Object Name -Descending | Select-Object -Skip 50 | Remove-Item -Force
     } catch {}
 }
@@ -929,9 +930,9 @@ function Invoke-CashCheck {
     $bmp = Get-ScreenBitmap (Get-CashRect)
     try {
         $grid = [WdPopup]::WhiteGrid($bmp, 24, 4, $PopupGateWhite, $PopupGateSpread)
-        $stale = ((Get-Date) - $script:CashLastOcr).TotalSeconds -ge 10
+        $stale = ([datetime]::UtcNow - $script:CashLastOcr).TotalSeconds -ge 10
         if ([WdPopup]::GridDiff($grid, $script:CashLastGrid) -lt 0.05 -and -not $stale) { return }
-        $script:CashLastGrid = $grid; $script:CashLastOcr = Get-Date
+        $script:CashLastGrid = $grid; $script:CashLastOcr = [datetime]::UtcNow
         $read = Read-CashHud $bmp
         if (-not $read) { return }
         $lifeStart = $read.Banked - $read.Life
