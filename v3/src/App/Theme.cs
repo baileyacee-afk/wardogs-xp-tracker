@@ -19,7 +19,7 @@ namespace Wardogs.App
         // Fills %GOLD% etc. in a XAML template.
         public static string Fill(string xaml) => xaml
             .Replace("%GOLD%", Gold).Replace("%GREEN%", Green).Replace("%INK%", Ink).Replace("%MUTED%", Muted)
-            .Replace("%DIM%", Dim).Replace("%LINE%", Line);
+            .Replace("%DIM%", Dim).Replace("%LINE%", Line).Replace("@APPNAME@", Program.AppName);
 
         public static string Cash(long amount) => amount < 0 ? $"-${Math.Abs(amount):N0}" : $"+${amount:N0}";
 

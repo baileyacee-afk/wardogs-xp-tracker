@@ -131,10 +131,12 @@ namespace Wardogs.App
             if (demo) { DemoStep(); return; }
             var game = GameScreen.GameProcess();
             gameNow = game != null;
+            NoteGameGone(game != null);
             // Time in a match without live tracking makes the deduced bonus less certain.
             if (tracker.IsMatchActive() && tracker.State.EndRequested == null && LiveState != "on") tracker.AddLiveGap(2);
             if (Paused) return;
             if (game != null && settings.Continuous) { var sw = Stopwatch.StartNew(); CashCheck(); Perf.Add("cash", sw); }
+            if (game != null && settings.Continuous) { var sw = Stopwatch.StartNew(); LoadingCheck(); SaveResultsPicture(); Perf.Add("end-watch", sw); }
 
             var rect = GameScreen.ParseRect(settings.PanelRect);
             if (rect.IsEmpty)
@@ -217,6 +219,7 @@ namespace Wardogs.App
             lastNote = res.Note;
             if (!res.Accepted) return;
             foreach (var t in res.NewTiers) AnnounceTier(t);
+            if (res.NewTiers.Count > 0) resultsUntil = DateTime.UtcNow.AddSeconds(60);   // a jump this big may be the results screen's bonus
             Status = "";
             if (res.Filed != null) OnFiled(res.Filed);
             else RaiseChanged();
@@ -270,7 +273,7 @@ namespace Wardogs.App
                     findNote = "";
                     UseRead(read);
                     if (manual) SetStatus($"Read the Wardog Level screen at {DateTime.Now:h:mm:ss tt}: totals updated.");
-                    if (manual) Notify("Wardogs XP Tracker", $"Found the Wardog Level screen ({read.Count} of 6 roles). It will be read automatically from now on.");
+                    if (manual) Notify(Program.AppName, $"Found the Wardog Level screen ({read.Count} of 6 roles). It will be read automatically from now on.");
                     return;
                 }
                 if (upgrade) continue;
@@ -307,11 +310,97 @@ namespace Wardogs.App
             if (PixelMath.GridDiff(grid, cashLastGrid) < 0.05 && !stale) return;
             cashLastGrid = grid; cashLastOcr = DateTime.UtcNow;
             var read = Reading.Popups.ReadCashHud(bmp);
-            if (read == null) return;
+            if (read == null)
+            {
+                var menu = Reading.Popups.ReadMenuBoxes(bmp);
+                if (menu != null) PayoutCheck(menu.Value.First, menu.Value.Banked);
+                return;
+            }
+            if (PayoutCheck(read.Value.Life, read.Value.Banked)) return;
             long lifeStart = read.Value.Banked - read.Value.Life;
             bool confirmed = lifeStart == cashPrevLifeStart;
             cashPrevLifeStart = lifeStart;
+            if (confirmed) { hudBank = read.Value.Banked; hudLifeStart = lifeStart; hudAt = DateTime.UtcNow; }
             if (confirmed && tracker.SetBankRead(read.Value.Banked, lifeStart)) RaiseChanged();
+        }
+
+        // ------------------------------------------------------------ noticing the end of a match
+        // Two signs, both seen in recordings of real matches. The payout landing in the banked cash ends the
+        // match like pressing END MATCH once, so a Wardog Level read still gets the bonus. The next match's
+        // loading screen means the last one is over for certain: it's filed as it stands, so the new match
+        // starts clean.
+        long hudBank, hudLifeStart, jumpLogged; DateTime hudAt = DateTime.MinValue;
+        DateTime resultsUntil = DateTime.MinValue, resultsLastPicture = DateTime.MinValue;
+
+        bool PayoutCheck(long first, long banked)
+        {
+            double age = (DateTime.UtcNow - hudAt).TotalSeconds;
+            // A big jump that doesn't count: say why, once, to tune this from real matches.
+            if (hudAt != DateTime.MinValue && banked - hudBank >= 2000 && banked != jumpLogged)
+            {
+                jumpLogged = banked;
+                Log.Write($"cash jump: banked {hudBank} -> {banked}, first box {first}, life started at {hudLifeStart}, last read {age:N0} s ago");
+                resultsUntil = DateTime.UtcNow.AddSeconds(60);
+            }
+            if (age > 20 || !tracker.HasPlayed()) return false;   // needs a recent banked cash to compare with
+            if (!Reading.Popups.IsPayout(first, banked, hudBank, hudLifeStart)) return false;
+            Log.Write($"results screen: banked cash {hudBank} -> {banked}");
+            resultsUntil = DateTime.UtcNow.AddSeconds(60);
+            DoEndMatch();
+            return true;
+        }
+
+        // After a crash the game lets you rejoin the same match with your stats kept. So when the game went
+        // away and came back within 20 minutes, a loading screen for the same map carries on the match.
+        bool loadingUp, cameBack; string matchMap; DateTime? gameGoneAt;
+
+        void NoteGameGone(bool running)
+        {
+            if (!running) { gameGoneAt ??= DateTime.UtcNow; return; }
+            if (gameGoneAt == null) return;
+            var gone = DateTime.UtcNow - gameGoneAt.Value;
+            if (gone.TotalSeconds >= 15 && gone.TotalMinutes <= 20) cameBack = true;
+            gameGoneAt = null;
+        }
+
+        void LoadingCheck()
+        {
+            using var bmp = GameScreen.Capture(Reading.Popups.LoadingRect());
+            bool was = loadingUp;
+            loadingUp = Reading.Popups.IsLoadingScreen(bmp);
+            if (!loadingUp || was) return;
+            string map;
+            using (var mapBmp = GameScreen.Capture(Reading.Popups.LoadingMapRect())) map = Reading.Popups.ReadLoadingMap(mapBmp);
+            bool rejoin = Reading.Popups.IsRejoin(cameBack, matchMap, map);
+            cameBack = false;
+            Popups.Reset();
+            hudAt = DateTime.MinValue;
+            if (rejoin && tracker.HasPlayed())
+            {
+                Log.Write($"loading screen: back in {map} after the game closed, same match");
+                return;
+            }
+            matchMap = map;
+            if (!tracker.HasPlayed()) return;
+            Log.Write($"loading screen: the last match is over, next map {map}");
+            Status = "";
+            OnFiled(tracker.CompleteMatchAtLoading());
+        }
+
+        // The results screen hasn't been recorded in full yet: keep a few pictures of it for tuning.
+        void SaveResultsPicture()
+        {
+            if (DateTime.UtcNow > resultsUntil || (DateTime.UtcNow - resultsLastPicture).TotalSeconds < 10) return;
+            resultsLastPicture = DateTime.UtcNow;
+            try
+            {
+                var dir = Path.Combine(tracker.DataDir, "results");
+                Directory.CreateDirectory(dir);
+                using var bmp = GameScreen.Capture(GameScreen.GameRect());
+                bmp.Save(Path.Combine(dir, DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".jpg"), ImageFormat.Jpeg);
+                foreach (var f in new DirectoryInfo(dir).GetFiles("*.jpg").OrderByDescending(f => f.Name).Skip(24)) f.Delete();
+            }
+            catch { }
         }
 
         // ------------------------------------------------------------ live popups

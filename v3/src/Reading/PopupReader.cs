@@ -70,6 +70,7 @@ namespace Wardogs.Reading
     public static class Popups
     {
         const RegexOptions I = RegexOptions.IgnoreCase;   // PowerShell's -match / -replace ignore case
+        const int MaxPopupXp = 1000;
 
         // Reasons that always go to one class, so the symbol only matters for the others.
         public static readonly Dictionary<string, string> ReasonRoles = new(StringComparer.OrdinalIgnoreCase)
@@ -85,6 +86,8 @@ namespace Wardogs.Reading
         public static readonly Dictionary<string, string[]> ReasonChoices = new(StringComparer.OrdinalIgnoreCase)
         {
             ["PASSENGER SURVIVED"] = new[] { "driver", "pilot" }, ["SUPPLIES DELIVERED"] = new[] { "driver", "pilot" },
+            // Blowing up a FOB pays Assault XP even as a Medic. These rows fade over bright scenes, where a faint symbol looked like Pilot's.
+            ["BUILDABLE DESTROYED"] = new[] { "infantry", "support" }, ["BUILDABLE DESTROYED ASSIST"] = new[] { "infantry", "support" },
         };
         // Other XP reasons seen in matches; the symbol decides the class.
         static readonly string[] OtherXpReasons =
@@ -199,7 +202,8 @@ namespace Wardogs.Reading
                 var row = new PopupRow { Y = ws.Min(w => w.Y), H = h, Text = text };
                 // No digits: a prompt, or a row still fading in. "/" or several numbers: the Wardog Level
                 // screen showing through. Either way not a popup to read, but it shows the row is there.
-                if (!Regex.IsMatch(text, @"\d") || Regex.IsMatch(text, @"\d\s*/") || ws.Count(w => Regex.IsMatch(w.Text, @"^\D?\d[\d,]{1,}", I)) >= 2)
+                // A marker's distance ("352 m") passing behind the popup area isn't one either.
+                if (!Regex.IsMatch(text, @"\d") || Regex.IsMatch(text, @"\d\s*/") || Regex.IsMatch(text, @"^\D?\d+\s*m$", I) || ws.Count(w => Regex.IsMatch(w.Text, @"^\D?\d[\d,]{1,}", I)) >= 2)
                 {
                     row.Kind = "other"; rows.Add(row); continue;
                 }
@@ -291,6 +295,8 @@ namespace Wardogs.Reading
                 }
                 // Reasons that only pay cash are never XP, however the amount was read.
                 if (row.Kind == "xp" && CashOnlyReasons.Contains(row.Reason)) row.Kind = "unparsed";
+                // No real popup pays this much (the most seen is 750): it's a cash row with its "$" read as a digit ("+$241" -> "5241").
+                if (row.Kind == "xp" && row.Amount >= MaxPopupXp) row.Kind = "unparsed";
                 rows.Add(row);
             }
             return rows;
@@ -340,6 +346,62 @@ namespace Wardogs.Reading
             if (!string.IsNullOrEmpty(tail) && !tail.Contains('$') && Regex.IsMatch(tail, @"^\d{1,3}$")) return null;   // Wardog level box: a menu
             if (amounts.Count != 2 || amounts[1] < 0) return null;
             return (amounts[0], amounts[1]);
+        }
+
+        // The same boxes on a menu or the results screen: first box, banked cash, Wardog level. null on any other screen.
+        public static (long First, long Banked, int Level)? ReadMenuBoxes(Bitmap bmp)
+        {
+            var words = Ocr.Read(bmp, 3).OrderBy(w => w.X).ToList();
+            var tail = words.LastOrDefault()?.Text;
+            if (string.IsNullOrEmpty(tail) || !Regex.IsMatch(tail, @"^\d{1,3}$")) return null;
+            var amounts = new List<long>();
+            foreach (Match m in CashAmount.Matches(Join(words)))
+            {
+                var n = PopupNumber(m.Groups["n"].Value);
+                if (n != null) amounts.Add(m.Groups["s"].Value.Length > 0 ? -n.Value : n.Value);
+            }
+            if (amounts.Count != 2 || amounts[1] < 0) return null;
+            return (amounts[0], amounts[1], int.Parse(tail));
+        }
+
+        // The end-of-match payout lands in the banked cash all at once, just before the level box appears.
+        // Menus show these same boxes during a match, so seeing them isn't enough: only a jump far above
+        // normal income counts, and the boxes must add up (banked - first box = banked cash at the start of
+        // this life), which rules out a misread.
+        public const long PayoutJump = 5000;
+        public static bool IsPayout(long first, long banked, long lastBank, long lifeStart) =>
+            banked - lastBank >= PayoutJump && banked - first == lifeStart;
+
+        // The loading screen before a match, bottom left: "AREA OF OPERATIONS //  MATCH INFO //".
+        public static Rectangle LoadingRect()
+        {
+            var g = GameScreen.GameRect();
+            return new Rectangle(Num.R(g.X + g.Width * 0.02), Num.R(g.Y + g.Height * 0.78), Num.R(g.Width * 0.28), Num.R(g.Height * 0.045));
+        }
+
+        // The map's big name, right under that line.
+        public static Rectangle LoadingMapRect()
+        {
+            var g = GameScreen.GameRect();
+            return new Rectangle(Num.R(g.X + g.Width * 0.02), Num.R(g.Y + g.Height * 0.825), Num.R(g.Width * 0.38), Num.R(g.Height * 0.06));
+        }
+
+        // The box is wide enough for a long name, so it also takes in the player count and clock beside it: words only.
+        public static string ReadLoadingMap(Bitmap bmp)
+        {
+            var words = Ocr.Read(bmp).OrderBy(w => w.X).Select(w => w.Text.ToUpperInvariant()).Where(w => Regex.IsMatch(w, "^[A-Z]{3,}$"));
+            var text = string.Join("", words);
+            return text.Length >= 3 ? text : null;
+        }
+
+        // Back from the game closing, and not on a different map. A map that couldn't be read gets the benefit of the doubt.
+        public static bool IsRejoin(bool cameBack, string matchMap, string map) =>
+            cameBack && (matchMap == null || map == null || PixelMath.EditDistance(matchMap, map) <= 2);
+
+        public static bool IsLoadingScreen(Bitmap bmp)
+        {
+            var text = Join(Ocr.Read(bmp).OrderBy(w => w.X).ToList()).ToUpperInvariant();
+            return text.Contains("AREA OF OPERATIONS") && text.Contains("MATCH INFO");
         }
     }
 

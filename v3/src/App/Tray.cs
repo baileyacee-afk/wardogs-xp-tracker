@@ -17,7 +17,7 @@ namespace Wardogs.App
         public Tray()
         {
             var w = Program.Window; var s = Program.Settings;
-            icon = new NotifyIcon { Icon = Badge(SystemInformation.SmallIconSize.Width), Text = $"Wardogs XP Tracker v{Program.Version}{(Program.Demo ? " (demo)" : "")}" };
+            icon = new NotifyIcon { Icon = Badge(SystemInformation.SmallIconSize.Width), Text = $"{Program.AppName} v{Program.Version}{(Program.Demo ? " (demo)" : "")}" };
             var menu = new ContextMenuStrip();
             ToolStripMenuItem Add(string text, Action click, string keys = null)
             {
@@ -34,7 +34,7 @@ namespace Wardogs.App
             Add("Match details", () => MatchDetails.Show(null));
             miLive = Add("Live popup tracking", () => Program.ToggleLive(), "Ctrl+Shift+C");
             Add("Set popup area...", () => Program.SetPopupArea());
-            Add("Reset popup area", () => { s.PopupRect = null; Program.SaveSettings(); Program.Worker.ResetPopups(); Balloon("Wardogs XP Tracker", "Popup area reset to the default spot."); });
+            Add("Reset popup area", () => { s.PopupRect = null; Program.SaveSettings(); Program.Worker.ResetPopups(); Balloon(Program.AppName, "Popup area reset to the default spot."); });
             Add("Find Wardog Level screen", () => Program.Worker.ManualFind(), "Ctrl+Shift+U");
             miClick = Add("Click-through", () => Program.ToggleClickThrough(), "Ctrl+Shift+L");
 
@@ -71,10 +71,10 @@ namespace Wardogs.App
             miScStart = new ToolStripMenuItem("In the Start menu"); miScStart.Click += (_, _) => { Shortcuts.Switch(Shortcuts.Kind.StartMenu); Sync(); };
             miScDesk = new ToolStripMenuItem("On the desktop"); miScDesk.Click += (_, _) => { Shortcuts.Switch(Shortcuts.Kind.Desktop); Sync(); };
             miShortcuts.DropDownItems.Add(miScStart); miShortcuts.DropDownItems.Add(miScDesk);
-            menu.Items.Add(miShortcuts);
+            if (!Program.Packaged) menu.Items.Add(miShortcuts);   // the Store version's Start menu entry is Windows'
             Add("Open data folder", () => System.Diagnostics.Process.Start("explorer.exe", Program.DataDir));
-            // Every release on GitHub (downloads and what changed in each).
-            Add($"Versions (you have v{Program.Version})...", () => Program.OpenReleases());
+            // Every release on GitHub (downloads and what changed in each); the Store version shows what changed.
+            Add(Program.Packaged ? $"What's new (you have v{Program.Version})..." : $"Versions (you have v{Program.Version})...", () => Program.OpenReleases());
             menu.Items.Add(new ToolStripSeparator());
             Add("Exit", () => Program.Exit());
 
@@ -96,7 +96,7 @@ namespace Wardogs.App
             miScStart.Checked = s.StartMenuShortcut;
             miScDesk.Checked = s.DesktopShortcut;
             foreach (ToolStripMenuItem mi in miOpacity.DropDownItems) mi.Checked = (int)mi.Tag == s.Opacity;
-            icon.Text = $"Wardogs XP Tracker v{Program.Version}{(Program.Demo ? " (demo)" : "")}{(Program.Worker.Paused ? " - paused" : "")}";
+            icon.Text = $"{Program.AppName} v{Program.Version}{(Program.Demo ? " (demo)" : "")}{(Program.Worker.Paused ? " - paused" : "")}";
         }
 
         public void Balloon(string title, string text, ToolTipIcon kind = ToolTipIcon.None, int ms = 3000)

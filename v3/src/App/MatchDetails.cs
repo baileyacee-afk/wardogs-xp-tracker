@@ -129,7 +129,7 @@ namespace Wardogs.App
         </StackPanel>
         <StackPanel Orientation=""Horizontal"" HorizontalAlignment=""Right"" VerticalAlignment=""Top"">
           <Button x:Name=""DPic"" Content=""PICTURE"" ToolTip=""The tracker right after this match was filed"" Foreground=""%MUTED%"" Background=""Transparent"" BorderBrush=""%LINE%"" Padding=""8,3"" FontSize=""11"" Cursor=""Hand"" Margin=""0,0,6,0""/>
-          <Button x:Name=""DSave"" Content=""SAVE"" ToolTip=""Save this page (with the picture) to Documents\Wardogs XP Tracker and open it"" Foreground=""%GOLD%"" Background=""Transparent"" BorderBrush=""%LINE%"" Padding=""8,3"" FontSize=""11"" Cursor=""Hand"" Margin=""0,0,6,0""/>
+          <Button x:Name=""DSave"" Content=""SAVE"" ToolTip=""Save this page (with the picture) to Documents\@APPNAME@ and open it"" Foreground=""%GOLD%"" Background=""Transparent"" BorderBrush=""%LINE%"" Padding=""8,3"" FontSize=""11"" Cursor=""Hand"" Margin=""0,0,6,0""/>
           <Button x:Name=""DClose"" Content=""CLOSE"" Foreground=""%MUTED%"" Background=""Transparent"" BorderBrush=""%LINE%"" Padding=""8,3"" FontSize=""11"" Cursor=""Hand""/>
         </StackPanel>
       </Grid>
@@ -196,7 +196,7 @@ namespace Wardogs.App
         // Documents\Wardogs XP Tracker. Returns the file's path.
         public static string Export(HistoryEntry e, List<Line> lines, bool live)
         {
-            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Wardogs XP Tracker");
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), Program.AppName);
             Directory.CreateDirectory(dir);
             var start = e.Start.LocalDateTime;
             var file = Path.Combine(dir, $"Wardogs match {start:yyyy-MM-dd h.mm tt}.html");
@@ -243,7 +243,7 @@ footer {{ width: 100%; color: {Theme.Dim}; font-size: 12px; }}
 {img}
 <div class=""list"">
 {rows}</div>
-<footer>Saved by Wardogs XP Tracker v{Program.Version}.</footer>
+<footer>Saved by {Program.AppName} v{Program.Version}.</footer>
 </main></body></html>";
             File.WriteAllText(file, html, new UTF8Encoding(true));
             return file;

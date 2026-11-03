@@ -20,10 +20,16 @@ namespace Wardogs.App
     public static class Program
     {
         // Matches the GitHub release tag and CHANGELOG.md.
-        public const string Version = "3.6";
+        public const string Version = "3.7";
         public const string ReleasesUrl = "https://github.com/baileyacee-afk/wardogs-xp-tracker/releases";
+        public const string ChangelogUrl = "https://github.com/baileyacee-afk/wardogs-xp-tracker/blob/main/CHANGELOG.md";
 
         public static bool Demo { get; private set; }
+        // Installed from the Microsoft Store (an MSIX package): the Store updates it, Windows adds the
+        // Start menu entry, and its data lives in the package's own folder.
+        public static bool Packaged { get; } = IsPackaged();
+        // The Store version has its own name, without the game's.
+        public static string AppName => Packaged ? "Match Bonus Tracker" : "Wardogs XP Tracker";
         public static bool Exiting { get; private set; }
         public static string DataDir { get; private set; }
         public static Settings Settings { get; private set; }
@@ -64,15 +70,18 @@ namespace Wardogs.App
                 Native.AllowSetForegroundWindow(-1);
                 showSignal.Set();
                 if (!shownSignal.WaitOne(3000) && !noDialog)
-                    MessageBox.Show("Wardogs XP Tracker is already running (see the tray icon). If it's the older version, quit it from its tray icon first.", "Wardogs XP Tracker");
+                    MessageBox.Show(AppName + " is already running (see the tray icon). If it's the older version, quit it from its tray icon first.", AppName);
                 return 0;
             }
 
             // ------------------------------------------------ data
-            DataDir = Demo ? Path.Combine(Path.GetTempPath(), "WardogsXpTracker-demo") : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WardogsXpTracker");
+            var classicDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WardogsXpTracker");
+            DataDir = Demo ? Path.Combine(Path.GetTempPath(), "WardogsXpTracker-demo")
+                : Packaged ? global::Windows.Storage.ApplicationData.Current.LocalFolder.Path : classicDir;
             if (Demo && Directory.Exists(DataDir)) { try { Directory.Delete(DataDir, true); } catch { } }
             Directory.CreateDirectory(DataDir);
-            if (!Demo) BackupOnce();
+            if (!Demo && Packaged) ImportOnce(classicDir);
+            else if (!Demo) BackupOnce();
             Log.Start(Path.Combine(DataDir, "tracker.log"), Version);
             try { Settings = Json.Read<Settings>(Path.Combine(DataDir, "settings.json")) ?? new Settings(); }
             catch (Exception e) { Log.Write("settings unreadable, using defaults: " + e.Message); Settings = new Settings(); }
@@ -86,7 +95,7 @@ namespace Wardogs.App
             AppDomain.CurrentDomain.UnhandledException += (_, e) =>
             {
                 Log.Write($"FATAL {e.ExceptionObject}");
-                if (!noDialog) MessageBox.Show($"Wardogs XP Tracker failed:\n\n{(e.ExceptionObject as Exception)?.Message}\n\nDetails are in tracker.log (tray menu: Open data folder).", "Wardogs XP Tracker");
+                if (!noDialog) MessageBox.Show($"{AppName} failed:\n\n{(e.ExceptionObject as Exception)?.Message}\n\nDetails are in tracker.log (tray menu: Open data folder).", AppName);
             };
 
             Hotkeys hotkeys = null;
@@ -169,7 +178,7 @@ namespace Wardogs.App
             catch (Exception e)
             {
                 Log.Write($"FATAL {e}");
-                if (!noDialog) MessageBox.Show($"Wardogs XP Tracker failed:\n\n{e.Message}", "Wardogs XP Tracker");
+                if (!noDialog) MessageBox.Show($"{AppName} failed:\n\n{e.Message}", AppName);
                 return 1;
             }
             finally
@@ -202,7 +211,7 @@ namespace Wardogs.App
             Shortcuts.Update();
             Tray.Sync();
             var where = System.Windows.Forms.Screen.AllScreens.Length > 1 ? "on your screen" : "in the corner of your screen";
-            Tray.Balloon("Wardogs XP Tracker is running", newStart
+            Tray.Balloon(AppName + " is running", newStart
                 ? $"It's {where}. Next time, start it from the Start menu: search for Wardogs."
                 : $"It's {where}. Drag it anywhere, or press Ctrl+Shift+M to jump between corners.", System.Windows.Forms.ToolTipIcon.None, 6000);
         }
@@ -227,6 +236,35 @@ namespace Wardogs.App
             catch { }
         }
 
+        // The first time the Store version runs, copy the matches, settings and learned symbols from the
+        // downloaded version's data folder (left as it was), so nothing is lost by switching.
+        static void ImportOnce(string from)
+        {
+            if (Directory.EnumerateFileSystemEntries(DataDir).Any() || !Directory.Exists(from)) return;
+            try
+            {
+                foreach (var name in new[] { "history.json", "match.json", "settings.json", "symbols.json" })
+                {
+                    var f = Path.Combine(from, name);
+                    if (File.Exists(f)) File.Copy(f, Path.Combine(DataDir, name));
+                }
+                var matches = Path.Combine(from, "matches");
+                if (Directory.Exists(matches))
+                {
+                    Directory.CreateDirectory(Path.Combine(DataDir, "matches"));
+                    foreach (var f in Directory.GetFiles(matches)) File.Copy(f, Path.Combine(DataDir, "matches", Path.GetFileName(f)));
+                }
+                File.WriteAllText(Path.Combine(DataDir, "imported-from.txt"), $"Copied from {from} on {DateTime.Now:yyyy-MM-dd HH:mm}{Environment.NewLine}");
+            }
+            catch { }
+        }
+
+        static bool IsPackaged()
+        {
+            try { return global::Windows.ApplicationModel.Package.Current != null; }
+            catch { return false; }   // throws when not running from a package
+        }
+
         public static void SaveSettings()
         {
             lock (settingsSync)
@@ -243,7 +281,7 @@ namespace Wardogs.App
             Log.Write(paused ? "tracking paused" : "tracking resumed");
             Tray.Sync();
             Window.Refresh();
-            Tray.Balloon("Wardogs XP Tracker", paused ? "Tracking paused. Nothing is read from the screen until you resume." : "Tracking resumed.");
+            Tray.Balloon(AppName, paused ? "Tracking paused. Nothing is read from the screen until you resume." : "Tracking resumed.");
         }
 
         public static void ToggleLive()
@@ -251,14 +289,14 @@ namespace Wardogs.App
             Settings.Continuous = !Settings.Continuous; SaveSettings();
             Worker.ResetPopups();
             Tray.Sync();
-            Tray.Balloon("Wardogs XP Tracker", Settings.Continuous ? "Live popup tracking on." : "Live popup tracking off.", System.Windows.Forms.ToolTipIcon.None, 2000);
+            Tray.Balloon(AppName, Settings.Continuous ? "Live popup tracking on." : "Live popup tracking off.", System.Windows.Forms.ToolTipIcon.None, 2000);
         }
 
         public static void ToggleClickThrough()
         {
             Window.SetClickThrough(!Settings.ClickThrough);
             Tray.Sync();
-            Tray.Balloon("Wardogs XP Tracker", Settings.ClickThrough ? "Click-through ON (Ctrl+Shift+L to turn off)" : "Click-through OFF", System.Windows.Forms.ToolTipIcon.None, 1500);
+            Tray.Balloon(AppName, Settings.ClickThrough ? "Click-through ON (Ctrl+Shift+L to turn off)" : "Click-through OFF", System.Windows.Forms.ToolTipIcon.None, 1500);
         }
 
         public static void SetPopupArea()
@@ -269,13 +307,14 @@ namespace Wardogs.App
             SaveSettings();
             Worker.ResetPopups();
             Log.Write($"popup area set to {Settings.PopupRect}");
-            Tray.Balloon("Wardogs XP Tracker", "Popup area saved.");
+            Tray.Balloon(AppName, "Popup area saved.");
         }
 
-        // Every release on GitHub (downloads and what changed in each).
+        // Every release on GitHub (downloads and what changed in each). The Store version updates
+        // through the Store, so it only shows what changed.
         public static void OpenReleases()
         {
-            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ReleasesUrl) { UseShellExecute = true }); }
+            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Packaged ? ChangelogUrl : ReleasesUrl) { UseShellExecute = true }); }
             catch (Exception e) { Log.Write("open releases ERROR " + e.Message); }
         }
 

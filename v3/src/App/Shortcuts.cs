@@ -18,7 +18,7 @@ namespace Wardogs.App
         static string Exe => Environment.ProcessPath;
 
         // Running from a build folder (testing): leave the real shortcuts alone.
-        public static bool Managed => !Program.Demo && Exe != null && !Exe.Contains(@"\bin\", StringComparison.OrdinalIgnoreCase);
+        public static bool Managed => !Program.Demo && !Program.Packaged && Exe != null && !Exe.Contains(@"\bin\", StringComparison.OrdinalIgnoreCase);
 
         static string LinkPath(Kind k) => Path.Combine(Environment.GetFolderPath(k == Kind.StartMenu ? Environment.SpecialFolder.Programs : Environment.SpecialFolder.DesktopDirectory), LinkName);
 
@@ -58,15 +58,49 @@ namespace Wardogs.App
             lnk.Save();
         }
 
+        // Store version: Windows makes the Start menu entry, and Start with Windows is the package's
+        // startup task (also shown in Task Manager's Startup apps, where it can be turned off too).
+        const string StartupTaskId = "WardogsXpTracker";
+
+        static async void SwitchPackagedStartup()
+        {
+            try
+            {
+                var task = await global::Windows.ApplicationModel.StartupTask.GetAsync(StartupTaskId);
+                var state = task.State;
+                if (state == global::Windows.ApplicationModel.StartupTaskState.Enabled) { task.Disable(); state = task.State; }
+                else state = await task.RequestEnableAsync();
+                bool on = state == global::Windows.ApplicationModel.StartupTaskState.Enabled;
+                Remember(Kind.Startup, on);
+                Program.Tray.Sync();
+                if (state == global::Windows.ApplicationModel.StartupTaskState.DisabledByUser)
+                    Program.Tray.Balloon(Program.AppName, "Start with Windows was turned off in Task Manager. Turn it back on there, under Startup apps.", System.Windows.Forms.ToolTipIcon.Warning);
+            }
+            catch (Exception e) { Log.Write("startup task ERROR " + e.Message); }
+        }
+
+        static async void SyncPackagedStartup()
+        {
+            try
+            {
+                var task = await global::Windows.ApplicationModel.StartupTask.GetAsync(StartupTaskId);
+                bool on = task.State is global::Windows.ApplicationModel.StartupTaskState.Enabled or global::Windows.ApplicationModel.StartupTaskState.EnabledByPolicy;
+                if (on != Program.Settings.StartWithWindows) Remember(Kind.Startup, on);
+                Program.Tray.Sync();
+            }
+            catch (Exception e) { Log.Write("startup task ERROR " + e.Message); }
+        }
+
         public static void Switch(Kind k)
         {
-            if (!Managed) { Program.Tray.Balloon("Wardogs XP Tracker", "Shortcuts aren't changed while running a test build."); return; }
+            if (Program.Packaged) { if (k == Kind.Startup) SwitchPackagedStartup(); return; }
+            if (!Managed) { Program.Tray.Balloon(Program.AppName, "Shortcuts aren't changed while running a test build."); return; }
             bool on = !IsOn(k);
             try { Apply(k, on); Remember(k, on); }
             catch (Exception e)
             {
                 Log.Write($"shortcut ERROR ({k}) {e.Message}");
-                Program.Tray.Balloon("Wardogs XP Tracker", "Couldn't change the shortcut: " + e.Message, System.Windows.Forms.ToolTipIcon.Warning);
+                Program.Tray.Balloon(Program.AppName, "Couldn't change the shortcut: " + e.Message, System.Windows.Forms.ToolTipIcon.Warning);
             }
         }
 
@@ -74,6 +108,7 @@ namespace Wardogs.App
         // PowerShell version's Start menu shortcut), and move its Startup-folder shortcut to the Run key.
         public static void Update()
         {
+            if (Program.Packaged) { SyncPackagedStartup(); return; }
             if (!Managed) return;
             try
             {

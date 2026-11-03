@@ -124,7 +124,9 @@ namespace Wardogs.Reading
                     var n = GameNumber(text);
                     if (n == null) continue;
                     if (Regex.IsMatch(text, "xp$", I)) { if (next == null) { next = n; used.Add(w); } }
-                    else if (level == null && xp == null && !Regex.IsMatch(text, "[,/]") && n <= 300) { level = n; used.Add(w); }
+                    // The level is the last small plain number above the XP: the Driver wheel (and other icons)
+                    // above it can read as "O", which must not become level 0 with the real level taken as XP.
+                    else if (xp == null && !Regex.IsMatch(text, "[,/]") && n <= 300) { level = n; used.Add(w); }
                     // The XP ("51,982 /") counts even when the level above it couldn't be read.
                     else if (xp == null && (level != null || Regex.IsMatch(text, "[,/]"))) { xp = n; used.Add(w); }
                 }

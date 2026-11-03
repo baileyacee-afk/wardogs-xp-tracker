@@ -3,6 +3,28 @@
 Versions match the [GitHub releases](https://github.com/baileyacee-afk/wardogs-xp-tracker/releases).
 The version you're running shows when you hover over the tray icon.
 
+## v3.7 (preview)
+
+For the .exe only: the PowerShell version stays at v2.11 for now.
+
+- **Notices the end of a match by itself.** When the end-of-match payout lands in your banked cash, the
+  match ends just as if you'd pressed END MATCH: open the Wardog Level screen to file it with its bonus.
+  If you skip that, the next match's loading screen files it, so the new match starts clean. A Wardog
+  Level read just before that loading screen counts as the final one, so the bonus still gets split out.
+  END MATCH still works, and is still the way to end a match early.
+- **Rejoining after a crash keeps the match.** If the game closes and you're back within 20 minutes on the
+  same map, the tracker carries on with the same match instead of filing it.
+- **No more fake Pilot XP from a FOB.** A cash row like "+$241" could be misread as 5,241 XP. A single popup
+  of 1,000 XP or more is now thrown out, since none is real. Blowing up a FOB goes to Assault or Support
+  by its symbol, not any class.
+- **Driver level fixed.** The Driver steering wheel on the Wardog Level screen could be read as level 0,
+  with the real level taken as the XP (86,339 XP became 18), so your Wardog level showed 18 too low and
+  stayed wrong. The level is now the number right above the XP, a level never drops along with the
+  XP, and a role that already took a misread corrects itself without counting the difference as XP earned.
+- **Distances aren't popups.** A marker's "352 m" passing behind the popups no longer counts as an
+  unreadable popup on the match's confidence note.
+- Groundwork for a Microsoft Store version (not published yet). Nothing changes in this .exe.
+
 ## v3.6 (preview) and v2.11
 
 - **No more freezing when the clocks change.** When daylight saving ended, the tracker stopped reading

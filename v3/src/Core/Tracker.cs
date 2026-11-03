@@ -136,6 +136,9 @@ namespace Wardogs.Core
         // True once anything has happened this match (so an empty match isn't filed).
         public bool IsMatchActive() { lock (Sync) return State.Base != null || State.Events.Count > 0; }
 
+        // True once XP or popups have been earned this match. A match that only has its starting read isn't one yet.
+        public bool HasPlayed() { lock (Sync) return State.Events.Count > 0 || RoleGains().Values.Any(g => g > 0); }
+
         public long MatchCash() { lock (Sync) return MatchCash(State); }
 
         // The match's net cash: banked cash change (includes gear bought), or the popup sum until the
@@ -144,6 +147,9 @@ namespace Wardogs.Core
             s.BankStart != null && s.BankNow != null ? s.BankNow.Value - s.BankStart.Value : s.Cash;
 
         // ------------------------------------------------------------ Wardog Level reads
+        const int FinalReadSeconds = 90, MinBonus = 300;   // the smallest bonus seen is 600 (one tier)
+        DateTimeOffset? beforeReadAt; Dictionary<string, long> beforeReadGains, beforeReadXp;
+
         // A role's level from a read; OCR sometimes can't read it (the icon above it confuses it), and then
         // the last known level stands.
         int? ReadLevel(Dictionary<string, RoleProgress> progress, string role) =>
@@ -162,6 +168,7 @@ namespace Wardogs.Core
 
                 // Misread protection, per role, so one bad number doesn't block the other roles.
                 // - In a match, a role's XP or level can't really drop, and a big drop is always a misread: never taken.
+                //   A level drop with an XP drop is never taken at any time.
                 // - A small drop or a big jump is taken only after ConfirmReads identical reads in a row; that's how a
                 //   value is corrected after an earlier misread slipped through.
                 var notes = new List<string>(); var corrected = new List<string>();
@@ -172,7 +179,9 @@ namespace Wardogs.Core
                     bool inMatch = State.Base != null && State.Base.ContainsKey(r);
                     var prevLv = State.Levels.GetValueOrDefault(r);
                     bool levelDrop = prevLv != null && progress[r].Level != null && progress[r].Level < prevLv;
-                    if (inMatch && (delta < -Roles.MaxJump || levelDrop))
+                    // Outside a match too: a level never goes down, so a lower level with lower XP is a misread
+                    // (the Driver wheel read as level 0 once made Driver 86,339 XP -> 18).
+                    if ((inMatch && (delta < -Roles.MaxJump || levelDrop)) || (levelDrop && delta < 0))
                     {
                         xp.Remove(r); pending.Remove(r); notes.Add($"{r} rejected ({prev} -> {progress[r].Xp})");
                         continue;
@@ -186,6 +195,13 @@ namespace Wardogs.Core
                     pending.Remove(r);
                 }
                 if (xp.Count == 0) return new ReadResult { Accepted = false, Note = string.Join("; ", notes) };
+
+                // Where things stood before this read, in case it turns out to be the match's final one. Reads
+                // repeat while the panel is open, so the first of a run is kept: it's the one before any bonus.
+                if (beforeReadAt == null || DateTimeOffset.Now - beforeReadAt > TimeSpan.FromSeconds(120) || State.PopupSinceRead.Values.Any(v => v != 0))
+                {
+                    beforeReadAt = DateTimeOffset.Now; beforeReadGains = RoleGains(); beforeReadXp = ExpectedXp();
+                }
 
                 // Starting XP is saved per role the first time each role is read this match; popups counted before
                 // that read are already in its total, so they're taken back out of the start.
@@ -203,6 +219,15 @@ namespace Wardogs.Core
                 {
                     bool hasPrev = State.Last.TryGetValue(r, out var prev);
                     if (!fresh.Contains(r) && !corrected.Contains(r) && hasPrev && xp[r] - prev > bestDelta) { bestDelta = xp[r] - prev; State.Active = r; }
+                    // A corrected misread isn't XP earned this match: the start moves with it, keeping only the
+                    // popups counted since the last read.
+                    if (corrected.Contains(r) && hasPrev && !fresh.Contains(r))
+                    {
+                        State.Base[r] += xp[r] - prev - State.PopupSinceRead.GetValueOrDefault(r);
+                        int? newLv = progress[r].Level, oldLv = State.Levels.GetValueOrDefault(r), baseLv = State.BaseLevels.GetValueOrDefault(r);
+                        if (newLv != null && oldLv != null && baseLv != null) State.BaseLevels[r] = baseLv + newLv - oldLv;
+                        notes.Add($"{r} corrected ({prev} -> {xp[r]})");
+                    }
                     State.Last[r] = xp[r];
                     State.Levels[r] = ReadLevel(progress, r);
                     if (progress[r].NextXp != null) State.Next[r] = progress[r].NextXp.Value;
@@ -296,11 +321,35 @@ namespace Wardogs.Core
                 if (State.EndRequested != null) return false;
                 State.EndRequested = DateTimeOffset.Now;
                 State.EndGains = RoleGains();
-                State.EndXp = new Dictionary<string, long>();
-                foreach (var r in Roles.Order)
-                    if (State.Last.TryGetValue(r, out var l)) State.EndXp[r] = l + State.PopupSinceRead.GetValueOrDefault(r);
+                State.EndXp = ExpectedXp();
                 Save();
                 return true;
+            }
+        }
+
+        // Each role's XP right now: its last read plus the popups since.
+        Dictionary<string, long> ExpectedXp()
+        {
+            var xp = new Dictionary<string, long>();
+            foreach (var r in Roles.Order)
+                if (State.Last.TryGetValue(r, out var l)) xp[r] = l + State.PopupSinceRead.GetValueOrDefault(r);
+            return xp;
+        }
+
+        // The next match's loading screen: the last one is over. The game may have paid the bonus into a Wardog
+        // Level read just before this, while the match still looked live. If nothing was earned since that read
+        // and it jumped by more than missed popups could explain, it was the final read after all.
+        public HistoryEntry CompleteMatchAtLoading()
+        {
+            lock (Sync)
+            {
+                bool final = State.EndRequested == null && beforeReadAt != null && State.LastRead != null
+                    && DateTimeOffset.Now - State.LastRead <= TimeSpan.FromSeconds(FinalReadSeconds)
+                    && State.PopupSinceRead.Values.All(v => v == 0)
+                    && beforeReadXp.Sum(kv => Math.Max(0, State.Last.GetValueOrDefault(kv.Key) - kv.Value)) >= MinBonus;
+                if (!final) return CompleteMatch(true);
+                State.EndRequested = beforeReadAt; State.EndGains = beforeReadGains; State.EndXp = beforeReadXp;
+                return CompleteMatch(false);
             }
         }
 
@@ -371,6 +420,7 @@ namespace Wardogs.Core
                     State.BaseLevels = new Dictionary<string, int?>(s.Levels);
                 }
                 pending.Clear();
+                beforeReadAt = null;
                 Save();
                 return entry;
             }

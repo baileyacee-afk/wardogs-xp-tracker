@@ -128,13 +128,15 @@ namespace Wardogs.App
             foreach (var n in new[] { "Frame", "Header", "TxtWardogLv", "TxtLvGain", "BtnDetails", "BtnNext", "BtnHide", "TxtMaxed", "Badge", "TxtNote", "TxtCash", "TxtKills", "HistoryList", "TxtStatus", "BtnVersions" }) names.Add(n);
 
             return Theme.Fill(MainXaml.Replace("@CHIPS@", chips.ToString()).Replace("@ROWS@", rows.ToString())
-                .Replace("@ROLECOUNT@", Roles.Order.Length.ToString()).Replace("@VERSION@", Program.Version));
+                .Replace("@ROLECOUNT@", Roles.Order.Length.ToString()).Replace("@VERSION@", Program.Version).Replace("@APPNAME@", Program.AppName)
+                .Replace("@VERSIONSLABEL@", Program.Packaged ? "WHAT'S NEW" : "VERSIONS")
+                .Replace("@VERSIONSTIP@", Program.Packaged ? "What changed in each version (the Store keeps it up to date)" : "Every version on GitHub: download another one or see what changed"));
         }
 
         const string MainXaml = @"
 <Window xmlns=""http://schemas.microsoft.com/winfx/2006/xaml/presentation""
         xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml""
-        Title=""Wardogs XP Tracker"" Width=""330"" SizeToContent=""Height""
+        Title=""@APPNAME@"" Width=""330"" SizeToContent=""Height""
         WindowStyle=""None"" AllowsTransparency=""True"" Background=""Transparent"" ResizeMode=""NoResize""
         Topmost=""True"" ShowInTaskbar=""True"" ShowActivated=""False""
         FontFamily=""Bahnschrift, Segoe UI"" Foreground=""%INK%"" UseLayoutRounding=""True"">
@@ -230,7 +232,7 @@ namespace Wardogs.App
       <Border Background=""#0F0C08"" CornerRadius=""0,0,6,6"" Margin=""0,10,0,0"" Padding=""14,7,10,7"">
         <DockPanel>
           <Button x:Name=""BtnVersions"" DockPanel.Dock=""Right"" VerticalAlignment=""Top"" Margin=""8,0,0,0"" Style=""{StaticResource Flat}"" FontSize=""10""
-                  Content=""v@VERSION@ &#x00B7; VERSIONS"" ToolTip=""Every version on GitHub: download another one or see what changed""/>
+                  Content=""v@VERSION@ &#x00B7; @VERSIONSLABEL@"" ToolTip=""@VERSIONSTIP@""/>
           <TextBlock x:Name=""TxtStatus"" Text=""Starting..."" FontSize=""11"" Foreground=""%DIM%"" TextWrapping=""Wrap""/>
         </DockPanel>
       </Border>

@@ -39,6 +39,50 @@ static class Program
                 Console.WriteLine($"{a,-9} " + string.Join(" ", Roles.Order.Select(b => $"{b.Substring(0, 3)}={PixelMath.Similarity(Symbols.Template(a), Symbols.Template(b)):N2}")) + $"  vs its drawing {PixelMath.Similarity(Symbols.Template(a), drawn[a]):N2}");
             return 0;
         }
+        if (args.Length >= 2 && args[0] == "--ends")
+        {
+            // --ends <samplesDir>: every change in the menu boxes in the recordings, and which full screenshots are loading screens
+            foreach (var dir in Directory.GetDirectories(args[1]).OrderBy(d => d))
+            {
+                Console.WriteLine(Path.GetFileName(dir));
+                foreach (var f in Directory.GetFiles(dir, "full-*.jpg").OrderBy(f => f))
+                {
+                    using var src = (Bitmap)Image.FromFile(f);
+                    using var box = src.Clone(new Rectangle(38, 842, 538, 49), PixelFormat.Format24bppRgb);
+                    Console.WriteLine($"  {Path.GetFileName(f)} loading={Popups.IsLoadingScreen(box)}");
+                    using var map = src.Clone(new Rectangle(38, 891, 730, 65), PixelFormat.Format24bppRgb);
+                    if (Popups.IsLoadingScreen(box)) Console.WriteLine($"    map {Popups.ReadLoadingMap(map)}");
+                }
+                // The same steps as Worker.CashCheck: a banked cash counts once two reads in a row agree.
+                int menus = 0, frames = 0, ends = 0; long? prevStart = null; long bank = 0, start = 0; DateTime hudAt = DateTime.MinValue; long biggest = 0;
+                foreach (var f in Directory.GetFiles(Path.Combine(dir, "frames"), "*.jpg").OrderBy(f => f))
+                {
+                    using var src = (Bitmap)Image.FromFile(f);
+                    using var box = src.Clone(new Rectangle(346, 0, 403, 59), PixelFormat.Format24bppRgb);
+                    frames++;
+                    var name = Path.GetFileNameWithoutExtension(f);
+                    var at = DateTime.ParseExact(name.Substring(0, 6), "HHmmss", CultureInfo.InvariantCulture);
+                    var h = Popups.ReadCashHud(box);
+                    var m = h == null ? Popups.ReadMenuBoxes(box) : null;
+                    if (m != null) menus++;
+                    if (h == null && m == null) continue;
+                    long first = h?.Life ?? m.Value.First, banked = h?.Banked ?? m.Value.Banked;
+                    if ((at - hudAt).TotalSeconds <= 20)
+                    {
+                        if (banked - first == start) biggest = Math.Max(biggest, banked - bank);
+                        if (Popups.IsPayout(first, banked, bank, start)) { ends++; Console.WriteLine($"  {name} END: banked {bank} -> {banked}, first box {first}"); hudAt = DateTime.MinValue; continue; }
+                    }
+                    if (h == null) continue;
+                    long ls = banked - first;
+                    if (ls == prevStart) { bank = banked; start = ls; hudAt = at; }
+                    prevStart = ls;
+                }
+                Console.WriteLine($"  frames {frames}, menu reads {menus}, ends {ends}, biggest jump that added up {biggest}");
+            }
+            return 0;
+        }
+        if (args.Length >= 1 && args[0] == "--finalread") return FinalReadCheck();
+        if (args.Length >= 1 && args[0] == "--driverwheel") return DriverWheelCheck();
         if (args.Length >= 1 && args[0] == "--panel") return PanelReplay();
         if (args.Length >= 2 && args[0] == "--ocr")
         {
@@ -53,6 +97,108 @@ static class Program
             return 0;
         }
         return Replay(args);
+    }
+
+    // The Driver wheel read as "O": it must not become level 0 with the real level (18) taken as the XP,
+    // and a match that already took 18 must correct back to 86,397 without counting it as XP earned.
+    static int DriverWheelCheck()
+    {
+        int bad = 0;
+        void Ok(bool ok, string what) { if (!ok) bad++; Console.WriteLine($"{(ok ? "ok  " : "FAIL")} {what}"); }
+
+        var words = new List<OcrWord>
+        {
+            new("DRIVER", 100, 100, 60, 14), new("O", 120, 125, 20, 20), new("18", 122, 150, 16, 14),
+            new("86,397", 95, 175, 50, 12), new("/", 147, 175, 6, 12), new("95,750XP", 100, 195, 60, 12),
+        };
+        var p = PanelReader.Read(words).Progress["driver"];
+        Ok(p.Level == 18 && p.Xp == 86397, $"panel with the wheel read as O: Lv{p.Level} {p.Xp} (want Lv18 86397)");
+
+        var tmp = Path.Combine(Path.GetTempPath(), "wd-driverwheel");
+        if (Directory.Exists(tmp)) Directory.Delete(tmp, true);
+        Directory.CreateDirectory(tmp);
+        Dictionary<string, RoleProgress> Read(int lv, long driver, long medic) => Roles.Order.ToDictionary(r => r, r =>
+            r == "driver" ? new RoleProgress { Level = lv, Xp = driver, NextXp = 95750 } : new RoleProgress { Level = 20, Xp = r == "medic" ? medic : 50000, NextXp = 900000 });
+
+        // Outside a match: a lower level with lower XP is never taken, however often it's read.
+        var tr = new Tracker(tmp);
+        tr.AddRead(Read(18, 86339, 500000));
+        tr.CompleteMatch(true);
+        for (int i = 0; i < 5; i++) tr.AddRead(Read(0, 18, 500000));
+        Ok(tr.State.Last["driver"] == 86339 && tr.State.Levels["driver"] == 18, $"five reads of Lv0 18 after a match: {tr.State.Last["driver"]} Lv{tr.State.Levels["driver"]} (want 86339 Lv18)");
+
+        // The state from the bug: the match started with the misread already in.
+        Directory.Delete(tmp, true); Directory.CreateDirectory(tmp);
+        tr = new Tracker(tmp);
+        tr.AddRead(Read(0, 18, 500000));
+        tr.AddPopupEvent("xp", 250, "KILL", "medic", false);
+        tr.AddRead(Read(0, 18, 500250));
+        for (int i = 0; i < 3; i++) tr.AddRead(Read(18, 86397, 500250));
+        var gains = tr.RoleGains();
+        Ok(tr.State.Last["driver"] == 86397 && tr.State.Levels["driver"] == 18, $"correct reads take over: {tr.State.Last["driver"]} Lv{tr.State.Levels["driver"]} (want 86397 Lv18)");
+        Ok(gains.GetValueOrDefault("driver") == 0 && gains.GetValueOrDefault("medic") == 250, $"match gains: driver {gains.GetValueOrDefault("driver")} (want 0), medic {gains.GetValueOrDefault("medic")} (want 250)");
+        Ok(tr.WardogLevel() == 18 + 5 * 20, $"wardog level {tr.WardogLevel()} (want {18 + 5 * 20})");
+        Console.WriteLine(bad == 0 ? "all ok" : $"{bad} failed");
+        return bad;
+    }
+
+    // Whole matches through the tracker, ending on the next match's loading screen.
+    static int FinalReadCheck()
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), "wd-finalread");
+        Dictionary<string, RoleProgress> Read(long inf, long med) => Roles.Order.ToDictionary(r => r, r => new RoleProgress { Level = 10, Xp = r == "infantry" ? inf : r == "medic" ? med : 50000, NextXp = 900000 });
+        int bad = 0;
+        void Check(string name, Action<Tracker> play, long? bonus, long xp)
+        {
+            if (Directory.Exists(tmp)) Directory.Delete(tmp, true);
+            Directory.CreateDirectory(tmp);
+            var tr = new Tracker(tmp);
+            play(tr);
+            var e = tr.CompleteMatchAtLoading();
+            bool ok = e.BonusTotal == bonus && e.Xp == xp;
+            if (!ok) bad++;
+            Console.WriteLine($"{(ok ? "ok  " : "FAIL")} {name}: bonus {e.BonusTotal?.ToString() ?? "none"} (want {bonus?.ToString() ?? "none"}), total {e.Xp} (want {xp}), placement {e.Placement}");
+            var after = tr.AddRead(Read(100000 + xp, 200000));
+            Console.WriteLine($"     next match starts clean: gains {tr.RoleGains().Values.Sum()}");
+        }
+        Check("bonus read just before loading", tr =>
+        {
+            tr.AddRead(Read(100000, 200000));
+            tr.AddPopupEvent("xp", 1000, "KILL", "infantry", false);
+            tr.AddRead(Read(101000 + 1400, 200000));
+            tr.AddRead(Read(101000 + 1400, 200000));
+        }, 1400, 2400);
+        Check("bonus shows after a read of the same totals", tr =>
+        {
+            tr.AddRead(Read(100000, 200000));
+            tr.AddPopupEvent("xp", 1000, "KILL", "infantry", false);
+            tr.AddRead(Read(101000, 200000));
+            tr.AddRead(Read(101000 + 1400, 200000));
+        }, 1400, 2400);
+        Check("popups after the last read: still playing then", tr =>
+        {
+            tr.AddRead(Read(100000, 200000));
+            tr.AddRead(Read(101400, 200000));
+            tr.AddPopupEvent("xp", 250, "KILL", "infantry", false);
+        }, null, 1650);
+        Check("only a few missed popups: not a bonus", tr =>
+        {
+            tr.AddRead(Read(100000, 200000));
+            tr.AddPopupEvent("xp", 1000, "KILL", "infantry", false);
+            tr.AddRead(Read(101100, 200000));
+        }, null, 1100);
+        Check("no read at all", tr => tr.AddPopupEvent("xp", 250, "KILL", "infantry", false), null, 250);
+        foreach (var (came, had, map, want) in new (bool, string, string, bool)[]
+        {
+            (true, "ZESTAFONA", "ZESTAFONA", true), (true, "ZESTAFONA", "ZESTAF0NA", true), (true, "ZESTAFONA", "BAKURANI", false),
+            (true, null, "BAKURANI", true), (true, "ZESTAFONA", null, true), (false, "ZESTAFONA", "ZESTAFONA", false),
+        })
+        {
+            bool ok = Popups.IsRejoin(came, had, map) == want;
+            if (!ok) bad++;
+            Console.WriteLine($"{(ok ? "ok  " : "FAIL")} rejoin: came back {came}, match on {had ?? "unknown"}, loading {map ?? "unreadable"}: {want}");
+        }
+        return bad;
     }
 
     static int CheckData(string dir)
