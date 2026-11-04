@@ -83,6 +83,7 @@ static class Program
         }
         if (args.Length >= 1 && args[0] == "--finalread") return FinalReadCheck();
         if (args.Length >= 1 && args[0] == "--driverwheel") return DriverWheelCheck();
+        if (args.Length >= 2 && args[0] == "--unfile") return Unfile(args[1], args.Length >= 3 && args[2] == "--apply");
         if (args.Length >= 1 && args[0] == "--panel") return PanelReplay();
         if (args.Length >= 2 && args[0] == "--ocr")
         {
@@ -97,6 +98,51 @@ static class Program
             return 0;
         }
         return Replay(args);
+    }
+
+    // --unfile <dataDir> [--apply]: a match filed by mistake while it was still going on (a false end and then
+    // a Wardog Level read) is put back into the current match. Without --apply it only prints what it would do.
+    // The tracker must not be running.
+    static int Unfile(string dir, bool apply)
+    {
+        var state = Json.Read<MatchState>(Path.Combine(dir, "match.json")).Fix();
+        var history = Json.ReadList<HistoryEntry>(Path.Combine(dir, "history.json")).Where(h => h != null).Select(h => h.Fix()).ToList();
+        var e = history[0];
+        var oldEvents = Json.ReadList<PopupEvent>(Path.Combine(dir, e.EventsFile));
+        Console.WriteLine($"filed: {e.Start:g} -> {e.End:g}, {e.Xp} XP (roles {e.Roles.Values.Sum()}, bonus {e.BonusTotal}), {oldEvents.Count} popups");
+        Console.WriteLine($"current: since {state.Start:g}, {state.Events.Count} popups, gains {Roles.Order.Sum(r => state.Last.GetValueOrDefault(r) + state.PopupSinceRead.GetValueOrDefault(r) - state.Base?.GetValueOrDefault(r) ?? 0)}");
+        if (state.Base == null) { Console.WriteLine("the current match has no start read: nothing to merge onto"); return 1; }
+
+        // Everything earned from the filed match's start to the current one's: its gains plus the "bonus".
+        foreach (var r in Roles.Order)
+            if (state.Base.ContainsKey(r)) state.Base[r] -= e.Roles.GetValueOrDefault(r) + e.Bonus.GetValueOrDefault(r);
+        int offset = oldEvents.Count == 0 ? 0 : oldEvents.Max(x => x.Id);
+        foreach (var x in state.Events) x.Id += offset;
+        state.Events = oldEvents.Concat(state.Events).ToList();
+        state.NextEventId += offset;
+        foreach (var kv in e.PopupXp) state.PopupXp[kv.Key] = state.PopupXp.GetValueOrDefault(kv.Key) + kv.Value;
+        state.Cash += e.Cash; state.Unparsed += e.Unparsed;
+        state.Start = e.Start;
+        foreach (var r in Roles.Order)
+        {
+            long g = state.Last.GetValueOrDefault(r) + state.PopupSinceRead.GetValueOrDefault(r) - state.Base.GetValueOrDefault(r, state.Last.GetValueOrDefault(r));
+            state.Tiers[r] = Math.Max(state.Tiers.GetValueOrDefault(r), Roles.Tier(g));   // no repeat of tiers already reached
+        }
+        Console.WriteLine($"merged: since {state.Start:g}, {state.Events.Count} popups, gains " +
+            string.Join(" ", Roles.Order.Select(r => $"{r}={state.Last.GetValueOrDefault(r) + state.PopupSinceRead.GetValueOrDefault(r) - state.Base.GetValueOrDefault(r, state.Last.GetValueOrDefault(r))}")));
+        if (!apply) { Console.WriteLine("(dry run: add --apply to write it)"); return 0; }
+
+        var keep = Path.Combine(dir, "before-unfile-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+        Directory.CreateDirectory(keep);
+        File.Copy(Path.Combine(dir, "match.json"), Path.Combine(keep, "match.json"));
+        File.Copy(Path.Combine(dir, "history.json"), Path.Combine(keep, "history.json"));
+        File.Move(Path.Combine(dir, e.EventsFile), Path.Combine(keep, Path.GetFileName(e.EventsFile)));
+        if (!string.IsNullOrEmpty(e.Snapshot) && File.Exists(Path.Combine(dir, e.Snapshot))) File.Move(Path.Combine(dir, e.Snapshot), Path.Combine(keep, Path.GetFileName(e.Snapshot)));
+        history.RemoveAt(0);
+        Json.Write(Path.Combine(dir, "match.json"), state);
+        Json.Write(Path.Combine(dir, "history.json"), history);
+        Console.WriteLine($"written; the old files are in {keep}");
+        return 0;
     }
 
     // The Driver wheel read as "O": it must not become level 0 with the real level (18) taken as the XP,

@@ -3,13 +3,24 @@
 Versions match the [GitHub releases](https://github.com/baileyacee-afk/wardogs-xp-tracker/releases).
 The version you're running shows when you hover over the tray icon.
 
+## v3.8 (preview)
+
+For the .exe only: the PowerShell version stays at v2.11 for now.
+
+- **No more splitting a match in the middle.** A big cash reward mid-match looks just like the
+  end-of-match payout, so v3.7 sometimes thought the match was over while you kept playing. The next
+  Wardog Level read then filed half a match, with the XP earned since counted as its bonus. Now only
+  the next match's loading screen ends a match. A Wardog Level read on the results screen, just
+  before that loading screen, still gets the bonus split out.
+
 ## v3.7 (preview)
 
 For the .exe only: the PowerShell version stays at v2.11 for now.
 
 - **Notices the end of a match by itself.** When the end-of-match payout lands in your banked cash, the
   match ends just as if you'd pressed END MATCH: open the Wardog Level screen to file it with its bonus.
-  If you skip that, the next match's loading screen files it, so the new match starts clean. A Wardog
+  If you skip that, the next match's loading screen files it, so the new match starts clean. (The
+  payout sign turned out to fire mid-match too: v3.8 drops it.) A Wardog
   Level read just before that loading screen counts as the final one, so the bonus still gets split out.
   END MATCH still works, and is still the way to end a match early.
 - **Rejoining after a crash keeps the match.** If the game closes and you're back within 20 minutes on the

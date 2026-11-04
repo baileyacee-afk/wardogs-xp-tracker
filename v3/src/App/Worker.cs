@@ -325,10 +325,9 @@ namespace Wardogs.App
         }
 
         // ------------------------------------------------------------ noticing the end of a match
-        // Two signs, both seen in recordings of real matches. The payout landing in the banked cash ends the
-        // match like pressing END MATCH once, so a Wardog Level read still gets the bonus. The next match's
-        // loading screen means the last one is over for certain: it's filed as it stands, so the new match
-        // starts clean.
+        // The next match's loading screen means the last one is over for certain: it's filed, with the bonus
+        // when a Wardog Level read just before it caught one, so the new match starts clean. A payout-sized
+        // jump in the banked cash is only logged (and pictured): mid-match rewards look the same.
         long hudBank, hudLifeStart, jumpLogged; DateTime hudAt = DateTime.MinValue;
         DateTime resultsUntil = DateTime.MinValue, resultsLastPicture = DateTime.MinValue;
 
@@ -344,10 +343,11 @@ namespace Wardogs.App
             }
             if (age > 20 || !tracker.HasPlayed()) return false;   // needs a recent banked cash to compare with
             if (!Reading.Popups.IsPayout(first, banked, hudBank, hudLifeStart)) return false;
-            Log.Write($"results screen: banked cash {hudBank} -> {banked}");
+            // Not a sign on its own: big rewards mid-match look just like the payout (twice on 2026-11-03 the
+            // match went on for 8 and 16 minutes after one). Only the loading screen ends the match.
+            Log.Write($"payout-sized jump: banked cash {hudBank} -> {banked} (the match goes on until the loading screen)");
             resultsUntil = DateTime.UtcNow.AddSeconds(60);
-            DoEndMatch();
-            return true;
+            return false;
         }
 
         // After a crash the game lets you rejoin the same match with your stats kept. So when the game went

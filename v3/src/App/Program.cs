@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -20,7 +20,7 @@ namespace Wardogs.App
     public static class Program
     {
         // Matches the GitHub release tag and CHANGELOG.md.
-        public const string Version = "3.7";
+        public const string Version = "3.8";
         public const string ReleasesUrl = "https://github.com/baileyacee-afk/wardogs-xp-tracker/releases";
         public const string ChangelogUrl = "https://github.com/baileyacee-afk/wardogs-xp-tracker/blob/main/CHANGELOG.md";
 
