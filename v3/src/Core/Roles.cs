@@ -26,6 +26,16 @@ namespace Wardogs.Core
         public const long MaxJump = 15000;    // a role can't really gain more than this between two reads
         public const int ConfirmReads = 3;    // identical reads needed before an unusual change is believed
 
+        // Season resets: every role starts over at level 0 ("–" on the panel), 0 / 200 XP.
+        public const int FirstLevelXp = 200;
+        // The XP needed for the next level -> the level it's needed from, as seen on the panel. Every role
+        // shares one curve. Used when OCR can't read a level (single digits, on top of the role icon, often
+        // go missing). More pairs are learned as levels are read.
+        public static readonly IReadOnlyDictionary<long, int> KnownLevelAt = new Dictionary<long, int>
+        {
+            [200] = 0, [750] = 1, [3000] = 3,
+        };
+
         public static readonly IReadOnlyDictionary<int, string> Placements = new Dictionary<int, string>
         {
             [800] = "1st place", [700] = "2nd place", [600] = "3rd place",   // bonus XP per tier

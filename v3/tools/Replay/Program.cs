@@ -83,6 +83,7 @@ static class Program
         }
         if (args.Length >= 1 && args[0] == "--finalread") return FinalReadCheck();
         if (args.Length >= 1 && args[0] == "--driverwheel") return DriverWheelCheck();
+        if (args.Length >= 1 && args[0] == "--seasonreset") return SeasonResetCheck();
         if (args.Length >= 2 && args[0] == "--unfile") return Unfile(args[1], args.Length >= 3 && args[2] == "--apply");
         if (args.Length >= 1 && args[0] == "--panel") return PanelReplay();
         if (args.Length >= 2 && args[0] == "--ocr")
@@ -184,6 +185,70 @@ static class Program
         Ok(tr.State.Last["driver"] == 86397 && tr.State.Levels["driver"] == 18, $"correct reads take over: {tr.State.Last["driver"]} Lv{tr.State.Levels["driver"]} (want 86397 Lv18)");
         Ok(gains.GetValueOrDefault("driver") == 0 && gains.GetValueOrDefault("medic") == 250, $"match gains: driver {gains.GetValueOrDefault("driver")} (want 0), medic {gains.GetValueOrDefault("medic")} (want 250)");
         Ok(tr.WardogLevel() == 18 + 5 * 20, $"wardog level {tr.WardogLevel()} (want {18 + 5 * 20})");
+        Console.WriteLine(bad == 0 ? "all ok" : $"{bad} failed");
+        return bad;
+    }
+
+    // The season reset of 2026-11: every role back to level 0. The panel's words are what OCR really read off it
+    // (results\20261112-080001.jpg): the single-digit levels and the "0 /" of unplayed roles are missing.
+    static int SeasonResetCheck()
+    {
+        int bad = 0;
+        void Ok(bool ok, string what) { if (!ok) bad++; Console.WriteLine($"{(ok ? "ok  " : "FAIL")} {what}"); }
+
+        var words = new List<OcrWord>
+        {
+            new("ASSAULT", 88, 58, 50, 10), new("1,600/", 95, 146, 36, 10), new("3,000XP", 92, 174, 42, 10),
+            new("RECON", 95, 194, 36, 10), new("200XP", 96, 310, 32, 10),
+            new("MEDIC", 211, 58, 36, 10), new("550/", 214, 146, 28, 10), new("750XP", 212, 174, 32, 10),
+            new("DRIVER", 209, 194, 40, 10), new("200XP", 211, 310, 32, 10),
+            new("SUPPORT", 319, 58, 52, 10), new("200XP", 326, 174, 32, 10),
+            new("PILOT", 327, 194, 30, 10), new("200XP", 326, 310, 32, 10),
+        };
+        var read = PanelReader.Read(words);
+        Ok(read.Count == 6, $"roles read off the reset panel: {read.Count} (want 6)");
+        var pg = read.Progress;
+        Ok(pg.GetValueOrDefault("pilot")?.Xp == 0 && pg.GetValueOrDefault("pilot")?.Level == 0, $"unplayed Pilot: Lv{pg.GetValueOrDefault("pilot")?.Level} {pg.GetValueOrDefault("pilot")?.Xp} (want Lv0 0)");
+        Ok(pg.GetValueOrDefault("infantry")?.Xp == 1600, $"Assault XP {pg.GetValueOrDefault("infantry")?.Xp} (want 1600)");
+
+        var tmp = Path.Combine(Path.GetTempPath(), "wd-seasonreset");
+        if (Directory.Exists(tmp)) Directory.Delete(tmp, true);
+        Directory.CreateDirectory(tmp);
+        // The last season's end: the state the tracker really had.
+        Dictionary<string, RoleProgress> Old() => new()
+        {
+            ["infantry"] = new() { Level = 26, Xp = 244884, NextXp = 246700 }, ["medic"] = new() { Level = 40, Xp = 714870, NextXp = 750400 },
+            ["support"] = new() { Level = 26, Xp = 230196, NextXp = 246700 }, ["recon"] = new() { Level = 20, Xp = 126686, NextXp = 127200 },
+            ["driver"] = new() { Level = 19, Xp = 98349, NextXp = 111500 }, ["pilot"] = new() { Level = 16, Xp = 73455, NextXp = 75000 },
+        };
+        var tr = new Tracker(tmp);
+        tr.AddRead(Old());
+        tr.CompleteMatch(false);                                       // the match filed with a final read: the next starts from it
+        tr.AddPopupEvent("xp", 1400, "KILL", "infantry", false);       // this match's popups, as counted before the panel was opened
+        tr.AddPopupEvent("xp", 656, "REVIVE", "medic", false);
+        var first = tr.AddRead(read.Progress);
+        Ok(!first.Accepted && tr.State.Last["infantry"] == 244884, $"one reset read isn't believed yet: {first.Note}");
+        tr.AddRead(read.Progress);
+        var third = tr.AddRead(read.Progress);
+        Ok(third.Accepted && third.Note.StartsWith("season reset"), $"third read: accepted {third.Accepted}, {third.Note}");
+        Ok(tr.State.Last["infantry"] == 1600 && tr.State.Last["pilot"] == 0, $"new totals: Assault {tr.State.Last["infantry"]}, Pilot {tr.State.Last["pilot"]}");
+        Ok(tr.WardogLevel() == 4, $"wardog level {tr.WardogLevel()} (want 4: Assault 3 + Medic 1)");
+        var g = tr.RoleGains();
+        Ok(g["infantry"] == 1400 && g["medic"] == 550 && g["pilot"] == 0, $"match gains kept: Assault {g["infantry"]} (want 1400), Medic {g["medic"]} (want 550, capped at its total), Pilot {g["pilot"]}");
+
+        // Afterwards it's an ordinary match again: popups and reads count as before.
+        tr.AddPopupEvent("xp", 300, "KILL", "infantry", false);
+        words[1] = words[1] with { Text = "1,900/" };
+        tr.AddRead(PanelReader.Read(words).Progress);
+        Ok(tr.RoleGains()["infantry"] == 1700, $"after the reset, Assault gains {tr.RoleGains()["infantry"]} (want 1700)");
+
+        // A single role misread low is still a misread, not a reset.
+        Directory.Delete(tmp, true); Directory.CreateDirectory(tmp);
+        tr = new Tracker(tmp);
+        tr.AddRead(Old());
+        var one = Old(); one["driver"] = new() { Level = 0, Xp = 18, NextXp = 111500 };
+        for (int i = 0; i < 5; i++) tr.AddRead(one);
+        Ok(tr.State.Last["driver"] == 98349 && tr.WardogLevel() == 147, $"one role read low five times: driver {tr.State.Last["driver"]}, wardog level {tr.WardogLevel()} (want 98349, 147)");
         Console.WriteLine(bad == 0 ? "all ok" : $"{bad} failed");
         return bad;
     }

@@ -6,7 +6,7 @@ matches, pictures, settings and learned class symbols carry over.
 
 ## What's different from v2.x
 
-- **One .exe.** Self-contained (about 78 MB): nothing else to install. Unsigned, so the first
+- **One .exe.** Self-contained (about 80 MB): nothing else to install. Unsigned, so the first
   time a downloaded copy runs, Windows may say *Windows protected your PC*: click **More info**,
   then **Run anyway**.
 - **Tray icon, always there.** Double-click it to show the window. Right-click: Show/Hide window,
@@ -23,8 +23,11 @@ matches, pictures, settings and learned class symbols carry over.
 - The first run keeps a copy of your data in `%LOCALAPPDATA%\WardogsXpTracker\backup-before-exe`.
 
 Everything else (live popups, per-match breakdown, the deduced end-of-match bonus, the Wardog
-Level reads, SAVE/PICTURE in match details, hotkeys) works as in v2.5; see the main
-[README](../README.md).
+Level reads, SAVE/PICTURE in match details, hotkeys) works as in the PowerShell version; see the
+main [README](../README.md). Since v3.7 the .exe also has things the PowerShell version doesn't
+yet: the next match's loading screen ends a match by itself (END MATCH is only needed to end one
+early), rejoining after a crash keeps the match, and the Driver level and FOB fixes. See
+[CHANGELOG.md](../CHANGELOG.md).
 
 ## Install
 

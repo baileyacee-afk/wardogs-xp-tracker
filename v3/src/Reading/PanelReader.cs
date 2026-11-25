@@ -130,6 +130,9 @@ namespace Wardogs.Reading
                     // The XP ("51,982 /") counts even when the level above it couldn't be read.
                     else if (xp == null && (level != null || Regex.IsMatch(text, "[,/]"))) { xp = n; used.Add(w); }
                 }
+                // A role never played this season shows "–" for its level and a tiny "0 /" that OCR almost always
+                // misses; only the first level's target ("200XP") comes through. That is level 0 with 0 XP.
+                if (level == null && xp == null && next == Roles.FirstLevelXp) { level = 0; xp = 0; }
                 if (level == null && xp == null) continue;
                 if (xp != null && next != null && xp > next) xp = null;   // misread, don't trust it
                 res.Progress[role] = new RoleProgress { Level = level, Xp = xp, NextXp = next };

@@ -3,6 +3,21 @@
 Versions match the [GitHub releases](https://github.com/baileyacee-afk/wardogs-xp-tracker/releases).
 The version you're running shows when you hover over the tray icon.
 
+## v3.9 (preview)
+
+For the .exe only: the PowerShell version stays at v2.11 for now.
+
+- **Follows a season reset.** When a new season starts every class back at level 0, the tracker used
+  to throw out the new Wardog Level reads as misreads (a level never goes down, it thought) and kept
+  showing last season's levels. Now, when most classes drop a lot at once in three reads in a row, it
+  starts over from the new totals. XP you'd already earned in the current match stays counted.
+- **Reads the fresh panel.** A class you haven't played yet shows "–" and a tiny "0 /" that text
+  recognition misses, so those reads came up short and were dropped. A class showing only the first
+  level's 200 XP target now counts as level 0 with 0 XP.
+- **Levels the text recognition can't read** (single digits on top of the class icon often go missing)
+  are worked out from the XP needed for the next level when that step is known, instead of keeping an
+  out-of-date level.
+
 ## v3.8 (preview)
 
 For the .exe only: the PowerShell version stays at v2.11 for now.

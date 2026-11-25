@@ -27,6 +27,7 @@ namespace Wardogs.Core
         public Dictionary<string, int?> Levels { get; set; } = new();
         public Dictionary<string, int?> BaseLevels { get; set; } = new();          // level per role when the match started
         public Dictionary<string, long> Next { get; set; } = new();               // XP needed for the next level
+        public Dictionary<long, int> LevelAt { get; set; } = new();               // next-level XP -> level, learned from reads
         public Dictionary<string, int> Tiers { get; set; } = new();               // highest bonus tier already announced
         public string Active { get; set; }                                         // the role that most recently gained XP
         public DateTimeOffset? LastRead { get; set; }
@@ -52,7 +53,7 @@ namespace Wardogs.Core
         // Files can hold null where a collection is expected.
         public MatchState Fix()
         {
-            Last ??= new(); Levels ??= new(); BaseLevels ??= new(); Next ??= new(); Tiers ??= new();
+            Last ??= new(); Levels ??= new(); BaseLevels ??= new(); Next ??= new(); LevelAt ??= new(); Tiers ??= new();
             Events ??= new(); PopupXp ??= new(); PopupSinceRead ??= new();
             if (NextEventId < 1) NextEventId = 1;
             return this;

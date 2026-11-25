@@ -150,10 +150,63 @@ namespace Wardogs.Core
         const int FinalReadSeconds = 90, MinBonus = 300;   // the smallest bonus seen is 600 (one tier)
         DateTimeOffset? beforeReadAt; Dictionary<string, long> beforeReadGains, beforeReadXp;
 
-        // A role's level from a read; OCR sometimes can't read it (the icon above it confuses it), and then
-        // the last known level stands.
-        int? ReadLevel(Dictionary<string, RoleProgress> progress, string role) =>
-            progress[role].Level ?? State.Levels.GetValueOrDefault(role);
+        // A role's level from a read. OCR sometimes can't read it (the icon above it confuses it, and single
+        // digits often go missing). Then the XP needed for the next level tells it, when that's a known step;
+        // otherwise the last known level stands, unless that next-level XP changed, which means it's out of date.
+        int? ReadLevel(Dictionary<string, RoleProgress> progress, string role)
+        {
+            var p = progress[role];
+            if (p.Level != null) return p.Level;
+            if (p.NextXp is long next)
+            {
+                if (Roles.KnownLevelAt.TryGetValue(next, out var known)) return known;
+                if (State.LevelAt.TryGetValue(next, out var learned)) return learned;
+                if (State.Next.TryGetValue(role, out var had) && had != next) return null;
+            }
+            return State.Levels.GetValueOrDefault(role);
+        }
+
+        // ------------------------------------------------------------ season reset
+        // When a season ends, the game starts every role over at level 0. One misread only ever hits one role;
+        // most roles all dropping a lot at once, read that way several reads in a row, is a reset.
+        int resetReads;
+
+        bool LooksLikeReset(Dictionary<string, RoleProgress> progress, Dictionary<string, long> xp)
+        {
+            var known = xp.Keys.Where(r => State.Last.ContainsKey(r)).ToList();
+            if (known.Count < Roles.MinRoles || known.Any(r => xp[r] > State.Last[r])) return false;
+            int dropped = known.Count(r =>
+            {
+                var was = State.Levels.GetValueOrDefault(r); var now = progress[r].Level;
+                return State.Last[r] - xp[r] > Roles.MaxJump || (was != null && now != null && now < was);
+            });
+            return dropped >= Roles.MinRoles;
+        }
+
+        // Starts over from this read. XP counted from popups this match stays earned this match (it can't be more
+        // than the role's whole new total), so the match carries on; only the old season's totals and levels go.
+        void StartNewSeason(Dictionary<string, RoleProgress> progress, Dictionary<string, long> xp)
+        {
+            State.Base = new Dictionary<string, long>();
+            State.BaseLevels = new Dictionary<string, int?>();
+            var popups = State.PopupSinceRead;
+            State.Last = new Dictionary<string, long>(); State.Levels = new Dictionary<string, int?>(); State.Next = new Dictionary<string, long>();
+            State.PopupSinceRead = new Dictionary<string, long>();
+            foreach (var r in xp.Keys)
+            {
+                long earned = Math.Min(xp[r], Math.Max(0, popups.GetValueOrDefault(r)));
+                State.Base[r] = xp[r] - earned;
+                State.Last[r] = xp[r];
+                State.Levels[r] = State.BaseLevels[r] = ReadLevel(progress, r);
+                if (progress[r].NextXp != null) State.Next[r] = progress[r].NextXp.Value;
+            }
+            // A role this read missed is picked up fresh by the next read that has it, popups and all.
+            foreach (var r in Roles.Order) if (!xp.ContainsKey(r) && popups.GetValueOrDefault(r) != 0) State.PopupSinceRead[r] = popups[r];
+            State.Active = null;
+            pending.Clear();
+            beforeReadAt = null;
+            resetReads = 0;
+        }
 
         // Applies one read of the Wardog Level panel. Filed is the history entry when this read finished a match.
         public ReadResult AddRead(Dictionary<string, RoleProgress> progress)
@@ -166,12 +219,21 @@ namespace Wardogs.Core
                     if (progress.TryGetValue(r, out var p) && p.Xp != null) xp[r] = p.Xp.Value;
                 if (xp.Count < Roles.MinRoles) return new ReadResult { Accepted = false, Note = $"only read {xp.Count} of 6 roles" };
 
+                var notes = new List<string>(); var corrected = new List<string>();
+                if (LooksLikeReset(progress, xp))
+                {
+                    if (++resetReads < Roles.ConfirmReads)
+                        return new ReadResult { Accepted = false, Note = $"looks like a season reset ({resetReads} of {Roles.ConfirmReads} reads)" };
+                    notes.Add("season reset: every role started over, " + string.Join(" ", xp.Keys.Select(r => $"{r}={State.Last.GetValueOrDefault(r)}->{xp[r]}")));
+                    StartNewSeason(progress, xp);
+                }
+                else resetReads = 0;
+
                 // Misread protection, per role, so one bad number doesn't block the other roles.
                 // - In a match, a role's XP or level can't really drop, and a big drop is always a misread: never taken.
                 //   A level drop with an XP drop is never taken at any time.
                 // - A small drop or a big jump is taken only after ConfirmReads identical reads in a row; that's how a
                 //   value is corrected after an earlier misread slipped through.
-                var notes = new List<string>(); var corrected = new List<string>();
                 foreach (var r in xp.Keys.ToList())
                 {
                     if (!State.Last.TryGetValue(r, out var prev)) continue;
@@ -230,6 +292,7 @@ namespace Wardogs.Core
                     }
                     State.Last[r] = xp[r];
                     State.Levels[r] = ReadLevel(progress, r);
+                    if (progress[r].Level is int lv && lv >= 1 && progress[r].NextXp is long nx) State.LevelAt[nx] = lv;
                     if (progress[r].NextXp != null) State.Next[r] = progress[r].NextXp.Value;
                     State.PopupSinceRead[r] = 0;   // the read is the truth; popups count on from here
                 }
@@ -412,7 +475,7 @@ namespace Wardogs.Core
                 // Next match starts from here. After a final read that XP already includes the bonus.
                 State = new MatchState
                 {
-                    Last = s.Last, Levels = s.Levels, Next = s.Next, LastRead = s.LastRead,
+                    Last = s.Last, Levels = s.Levels, Next = s.Next, LevelAt = s.LevelAt, LastRead = s.LastRead,
                 };
                 if (!noFinalRead && s.Last.Count > 0)
                 {
